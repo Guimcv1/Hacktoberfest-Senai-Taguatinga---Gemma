@@ -92,3 +92,10 @@ export function askQuestion(token, payload) {
     body: JSON.stringify(payload),
   })
 }
+
+export function unloadModel(token) {
+  return authorized(token, {
+    path: '/api/ai/unload',
+    method: 'POST',
+  })
+}
