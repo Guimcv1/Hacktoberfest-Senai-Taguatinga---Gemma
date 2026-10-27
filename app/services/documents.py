@@ -1,0 +1,79 @@
+"""Validação e extração de texto de PDFs, independente da camada HTTP."""
+
+from __future__ import annotations
+
+import fitz
+
+from app.schemas.documents import ExtractedDocument, ExtractedPage
+
+
+class DocumentProcessingError(Exception):
+    """Erro de domínio no processamento de documentos."""
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+class InvalidPdfError(DocumentProcessingError):
+    def __init__(self, message: str = "Arquivo PDF inválido.") -> None:
+        super().__init__("invalid_pdf", message)
+
+
+class EmptyPdfError(DocumentProcessingError):
+    def __init__(self, message: str = "O PDF não contém texto extraível.") -> None:
+        super().__init__("empty_pdf", message)
+
+
+class PdfTooLargeError(DocumentProcessingError):
+    def __init__(self, message: str = "Arquivo excede o tamanho máximo permitido.") -> None:
+        super().__init__("pdf_too_large", message)
+
+
+def extract_pdf(content: bytes, *, max_size_bytes: int | None = None) -> ExtractedDocument:
+    """Valida um PDF e extrai o texto de cada página, preservando a numeração."""
+    if not content:
+        raise InvalidPdfError()
+
+    if max_size_bytes is not None and len(content) > max_size_bytes:
+        raise PdfTooLargeError()
+
+    if not content.startswith(b"%PDF"):
+        raise InvalidPdfError()
+
+    try:
+        document = fitz.open(stream=content, filetype="pdf")
+    except Exception:
+        raise InvalidPdfError() from None
+
+    try:
+        return _extract_pages(document)
+    except DocumentProcessingError:
+        raise
+    except Exception:
+        raise InvalidPdfError() from None
+    finally:
+        document.close()
+
+
+def _extract_pages(document: fitz.Document) -> ExtractedDocument:
+    if document.is_encrypted or document.needs_pass:
+        raise InvalidPdfError("PDF protegido por senha não é suportado.")
+
+    if document.page_count < 1:
+        raise InvalidPdfError()
+
+    pages: list[ExtractedPage] = []
+    has_extractable_text = False
+
+    for page_number, page in enumerate(document, start=1):
+        text = page.get_text("text") or ""
+        if text.strip():
+            has_extractable_text = True
+        pages.append(ExtractedPage(page_number=page_number, text=text))
+
+    if not has_extractable_text:
+        raise EmptyPdfError()
+
+    return ExtractedDocument(page_count=document.page_count, pages=pages)
