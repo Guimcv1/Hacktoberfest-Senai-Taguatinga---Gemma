@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
+=======
+const API_URL = import.meta.env.VITE_API_URL ?? ''
+>>>>>>> e10bbaba10e3d0af0f7636072277845496b3bb03
 
 async function request(path, options = {}) {
   const headers = new Headers(options.headers)
@@ -94,5 +98,12 @@ export function askQuestion(token, payload) {
     path: '/api/chat',
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export function unloadModel(token) {
+  return authorized(token, {
+    path: '/api/ai/unload',
+    method: 'POST',
   })
 }

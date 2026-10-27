@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import UnloadModelCard from './UnloadModelCard'
 
-export default function AccountScreen({ user, onSave, onChangePassword, onLogout }) {
+export default function AccountScreen({ user, token, onSave, onChangePassword, onLogout }) {
   const [name, setName] = useState(user?.name || 'Arthur')
   const [email, setEmail] = useState(user?.email || '')
   const [saved, setSaved] = useState(false)
@@ -47,6 +48,7 @@ export default function AccountScreen({ user, onSave, onChangePassword, onLogout
       <label>Confirmar nova senha<input type="password" minLength="8" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>
       <div className="account-actions"><button className="primary-button" type="submit">Trocar senha</button>{passwordMessage && <small className="saved-message">{passwordMessage}</small>}</div>
     </form>
+    <UnloadModelCard token={token} />
     <div className="account-card account-danger"><h2>Sessão</h2><p>Encerre o acesso nesta sessão neste dispositivo.</p><button className="danger-button" type="button" onClick={onLogout}>Sair da conta</button></div>
   </section>
 }
