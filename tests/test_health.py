@@ -12,3 +12,11 @@ def test_health_returns_ok(client: TestClient) -> None:
 def test_docs_are_available(client: TestClient) -> None:
     response = client.get("/docs")
     assert response.status_code == 200
+
+
+def test_ready_reports_database(client: TestClient) -> None:
+    response = client.get("/ready")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["database"] == "ok"

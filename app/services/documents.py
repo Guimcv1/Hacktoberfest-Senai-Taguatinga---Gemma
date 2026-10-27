@@ -31,8 +31,21 @@ class PdfTooLargeError(DocumentProcessingError):
         super().__init__("pdf_too_large", message)
 
 
-def extract_pdf(content: bytes, *, max_size_bytes: int | None = None) -> ExtractedDocument:
-    """Valida um PDF e extrai o texto de cada página, preservando a numeração."""
+class PdfTooManyPagesError(DocumentProcessingError):
+    def __init__(self) -> None:
+        super().__init__("pdf_too_many_pages", "O PDF excede o limite de páginas.")
+
+
+def extract_pdf(
+    content: bytes,
+    *,
+    max_size_bytes: int | None = None,
+    max_pages: int | None = None,
+) -> ExtractedDocument:
+    """Valida um PDF e extrai o texto de cada página, preservando a numeração.
+
+    OCR não está implementado: PDFs só com imagem são rejeitados como sem texto.
+    """
     if not content:
         raise InvalidPdfError()
 
@@ -48,7 +61,7 @@ def extract_pdf(content: bytes, *, max_size_bytes: int | None = None) -> Extract
         raise InvalidPdfError() from None
 
     try:
-        return _extract_pages(document)
+        return _extract_pages(document, max_pages=max_pages)
     except DocumentProcessingError:
         raise
     except Exception:
@@ -57,12 +70,14 @@ def extract_pdf(content: bytes, *, max_size_bytes: int | None = None) -> Extract
         document.close()
 
 
-def _extract_pages(document: fitz.Document) -> ExtractedDocument:
+def _extract_pages(document: fitz.Document, *, max_pages: int | None = None) -> ExtractedDocument:
     if document.is_encrypted or document.needs_pass:
         raise InvalidPdfError("PDF protegido por senha não é suportado.")
 
     if document.page_count < 1:
         raise InvalidPdfError()
+    if max_pages is not None and document.page_count > max_pages:
+        raise PdfTooManyPagesError()
 
     pages: list[ExtractedPage] = []
     has_extractable_text = False

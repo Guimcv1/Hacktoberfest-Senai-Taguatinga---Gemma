@@ -1,15 +1,35 @@
-"""Upload e processamento HTTP de PDFs."""
+"""Upload e ciclo de vida de PDFs do usuário autenticado."""
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.schemas.documents import DocumentUploadResponse
-from app.services.document_store import DocumentStoreFullError, get_document_store
+from app.core.deps import get_current_user
+from app.db.models import User
+from app.db.session import get_db
+from app.schemas.documents import (
+    DocumentDetail,
+    DocumentListResponse,
+    DocumentMeta,
+    DocumentUploadResponse,
+)
+from app.services.document_repo import (
+    DocumentAccessError,
+    DocumentNotFoundError,
+    DocumentStoreFullError,
+    content_hash,
+    delete_document,
+    extracted_from_row,
+    get_owned_document,
+    list_documents,
+    pages_from_json,
+    save_document,
+)
 from app.services.documents import (
     DocumentProcessingError,
     PdfTooLargeError,
@@ -26,7 +46,19 @@ _HTTP_STATUS_BY_CODE = {
     "invalid_pdf": status.HTTP_400_BAD_REQUEST,
     "empty_pdf": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "pdf_too_large": status.HTTP_413_CONTENT_TOO_LARGE,
+    "pdf_too_many_pages": status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
+
+
+def _meta(row) -> DocumentMeta:
+    return DocumentMeta(
+        document_id=row.id,
+        filename=row.filename,
+        page_count=row.page_count,
+        text_chars=row.text_chars,
+        created_at=row.created_at,
+        expires_at=row.expires_at,
+    )
 
 
 @router.post(
@@ -34,49 +66,84 @@ _HTTP_STATUS_BY_CODE = {
     response_model=DocumentUploadResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Enviar PDF",
-    responses={
-        400: {"description": "Arquivo que não é um PDF válido ou está corrompido."},
-        413: {"description": "Arquivo acima do limite configurado em MAX_PDF_SIZE_MB."},
-        422: {"description": "PDF sem texto extraível ou formulário inválido."},
-    },
 )
 async def upload_document(
     file: UploadFile = File(..., description="Arquivo PDF enviado no campo file."),
     settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> DocumentUploadResponse:
     filename = Path(file.filename or "document.pdf").name
-
     try:
         content = await _read_upload_limited(file, settings.max_pdf_size_bytes)
-        extracted = extract_pdf(content, max_size_bytes=settings.max_pdf_size_bytes)
+        extracted = extract_pdf(
+            content,
+            max_size_bytes=settings.max_pdf_size_bytes,
+            max_pages=getattr(settings, "max_pdf_pages", None),
+        )
+        stored, deduplicated = save_document(
+            db,
+            user_id=current_user.id,
+            filename=filename,
+            extracted=extracted,
+            file_hash=content_hash(content),
+            settings=settings,
+        )
     except DocumentProcessingError as exc:
         raise HTTPException(
             status_code=_HTTP_STATUS_BY_CODE.get(exc.code, status.HTTP_400_BAD_REQUEST),
             detail=exc.message,
         ) from None
+    except DocumentStoreFullError as exc:
+        raise HTTPException(status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=exc.message) from None
     finally:
         await file.close()
 
-    try:
-        stored = get_document_store().save(filename=filename, extracted=extracted)
-    except DocumentStoreFullError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
-            detail=exc.message,
-        ) from None
-
-    logger.info(
-        "PDF processado: document_id=%s filename=%s page_count=%s",
-        stored.document_id,
-        filename,
-        stored.page_count,
-    )
+    logger.info("PDF processado: document_id=%s page_count=%s", stored.id, stored.page_count)
     return DocumentUploadResponse(
-        document_id=stored.document_id,
+        document_id=stored.id,
         filename=stored.filename,
         page_count=stored.page_count,
-        pages=stored.pages,
+        pages=pages_from_json(stored.pages_json) if deduplicated else extracted.pages,
+        deduplicated=deduplicated,
     )
+
+
+@router.get("/documents", response_model=DocumentListResponse)
+def list_user_documents(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DocumentListResponse:
+    rows, total = list_documents(db, current_user.id, limit=limit, offset=offset)
+    return DocumentListResponse(items=[_meta(row) for row in rows], total=total, limit=limit, offset=offset)
+
+
+@router.get("/documents/{document_id}", response_model=DocumentDetail)
+def get_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DocumentDetail:
+    try:
+        row = get_owned_document(db, current_user.id, document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
+    extracted = extracted_from_row(row)
+    return DocumentDetail(**_meta(row).model_dump(), pages=extracted.pages)
+
+
+@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    try:
+        delete_document(db, current_user.id, document_id)
+    except DocumentAccessError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
 
 
 async def _read_upload_limited(upload: UploadFile, max_size_bytes: int) -> bytes:

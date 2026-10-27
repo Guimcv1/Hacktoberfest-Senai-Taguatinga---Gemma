@@ -1,0 +1,15 @@
+# Desenvolvimento local opcional. Não é um ambiente de produção.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: studybuddy
+      POSTGRES_USER: studybuddy
+      POSTGRES_PASSWORD: studybuddy
+    ports:
+      - "5432:5432"
+    volumes:
+      - studybuddy_pg:/var/lib/postgresql/data
+
+volumes:
+  studybuddy_pg:

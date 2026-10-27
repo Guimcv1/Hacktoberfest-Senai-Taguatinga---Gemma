@@ -33,3 +33,5 @@ Thumbs.db
 uploads/
 tmp/
 .python-version
+data/
+*.db

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -16,3 +18,24 @@ class DocumentUploadResponse(BaseModel):
     filename: str = Field(description="Nome do arquivo enviado.")
     page_count: int = Field(ge=1, description="Quantidade de páginas do PDF.")
     pages: list[ExtractedPage]
+    deduplicated: bool = False
+
+
+class DocumentMeta(BaseModel):
+    document_id: str
+    filename: str
+    page_count: int
+    text_chars: int
+    created_at: datetime
+    expires_at: datetime
+
+
+class DocumentDetail(DocumentMeta):
+    pages: list[ExtractedPage]
+
+
+class DocumentListResponse(BaseModel):
+    items: list[DocumentMeta]
+    total: int
+    limit: int
+    offset: int

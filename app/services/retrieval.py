@@ -99,6 +99,40 @@ def query_terms(query: str) -> set[str]:
     return {token for token in tokenize(query) if token not in STOPWORDS and len(token) > 1}
 
 
+def retrieve_pages(
+    document: ExtractedDocument,
+    query: str,
+    *,
+    max_excerpts: int = 3,
+    max_chars: int = 6000,
+) -> tuple[list[ExtractedPage], bool]:
+    """Seleciona páginas relevantes. O segundo valor indica se houve correspondência lexical."""
+    terms = query_terms(query)
+    scored: list[tuple[int, ExtractedPage]] = []
+    seen_text: set[str] = set()
+    for page in document.pages:
+        normalized = " ".join(page.text.split())
+        if not normalized or normalized in seen_text:
+            continue
+        seen_text.add(normalized)
+        page_tokens = set(tokenize(page.text))
+        score = len(terms & page_tokens) if terms else 0
+        scored.append((score, page))
+
+    if not scored:
+        return [], False
+
+    matched = [page for score, page in scored if score > 0]
+    has_match = bool(matched)
+    if matched:
+        matched.sort(key=lambda page: (-_score(page, terms), page.page_number))
+        selected = matched[:max_excerpts]
+    else:
+        selected = [page for _, page in scored][:max_excerpts]
+
+    return _limit_chars(selected, max_chars), has_match
+
+
 def retrieve_relevant_excerpts(
     document: ExtractedDocument,
     query: str,
@@ -107,26 +141,13 @@ def retrieve_relevant_excerpts(
     max_chars: int = 6000,
 ) -> list[ExtractedPage]:
     """Seleciona páginas relevantes pela sobreposição de termos com a pergunta."""
-    terms = query_terms(query)
-    scored: list[tuple[int, ExtractedPage]] = []
-    for page in document.pages:
-        if not page.text.strip():
-            continue
-        page_tokens = set(tokenize(page.text))
-        score = len(terms & page_tokens) if terms else 0
-        scored.append((score, page))
-
-    if not scored:
-        return []
-
-    matched = [page for score, page in scored if score > 0]
-    if matched:
-        matched.sort(key=lambda page: (-_score(page, terms), page.page_number))
-        selected = matched[:max_excerpts]
-    else:
-        selected = [page for _, page in scored][:max_excerpts]
-
-    return _limit_chars(selected, max_chars)
+    pages, _has_match = retrieve_pages(
+        document,
+        query,
+        max_excerpts=max_excerpts,
+        max_chars=max_chars,
+    )
+    return pages
 
 
 def format_context(pages: list[ExtractedPage]) -> str:
