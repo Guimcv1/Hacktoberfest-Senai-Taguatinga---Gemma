@@ -155,3 +155,55 @@ thumb
 sketch
 
 # End of https://www.toptal.com/developers/gitignore/api/node,react
+# Virtual environments
+.venv/
+venv/
+/env/
+
+# Local environment files (keep .env.example)
+.env
+.env.*
+!.env.example
+docker-compose.override.yml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+dist/
+build/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local artifacts and databases
+*.log
+/data/
+/uploads/
+/tmp/
+.python-version
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Private keys and certificates
+*.pem
+*.key

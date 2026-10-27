@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 
 async function request(path, options = {}) {
   const headers = new Headers(options.headers)
@@ -18,7 +18,11 @@ async function request(path, options = {}) {
     let message = ''
     try {
       const body = await response.json()
-      message = body.detail || body.message || ''
+      if (Array.isArray(body.errors) && body.errors.length > 0) {
+        message = body.errors.map((e) => (e.field ? `${e.field}: ${e.message}` : e.message)).join(' | ')
+      } else {
+        message = body.detail || body.message || ''
+      }
     } catch {
       message = ''
     }

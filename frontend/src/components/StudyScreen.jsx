@@ -9,19 +9,55 @@ export default function StudyScreen({ study, token, onBack, onDelete, onAbandon,
   const [answer, setAnswer] = useState('')
   const [currentStep, setCurrentStep] = useState(study?.currentStep || 1)
   const [quizActive, setQuizActive] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [chatMessages, setChatMessages] = useState([])
+
+  function toggleMicrophone() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setAnswer('Seu navegador não oferece entrada por voz.')
+      return
+    }
+    if (isListening) return
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'pt-BR'
+    recognition.interimResults = false
+    recognition.onstart = () => setIsListening(true)
+    recognition.onresult = (event) => setQuestion((current) => `${current} ${event.results[0][0].transcript}`.trim())
+    recognition.onerror = () => setAnswer('Não foi possível captar sua voz. Tente novamente.')
+    recognition.onend = () => setIsListening(false)
+    recognition.start()
+  }
+
+  function speakAnswer(text) {
+    if ('speechSynthesis' in window && text) {
+      window.speechSynthesis.cancel()
+      window.speechSynthesis.speak(new SpeechSynthesisUtterance(text))
+    }
+  }
 
   async function ask(event) {
     event.preventDefault()
-    if (!question.trim()) return
+    const text = question.trim()
+    if (!text || isLoading) return
+    setChatMessages((current) => [...current, { role: 'student', text }])
+    setQuestion('')
+    setAnswer('')
+    setIsLoading(true)
     try {
-      const payload = { message: question }
+      const payload = { message: text }
       if (documentIds[0]) payload.document_id = documentIds[0]
       const response = await askQuestion(token, payload)
-      setAnswer(response.answer)
+      setAnswer(response.answer || 'Não consegui gerar uma resposta agora.')
+      setChatMessages((current) => [...current, { role: 'tutor', text: response.answer || 'Não consegui gerar uma resposta agora.' }])
     } catch (error) {
-      setAnswer('Ocorreu um erro da nossa parte. Tente novamente em alguns instantes.')
+      const errorMessage = 'Ocorreu um erro da nossa parte. Tente novamente em alguns instantes.'
+      setAnswer(errorMessage)
+      setChatMessages((current) => [...current, { role: 'tutor', text: errorMessage }])
+    } finally {
+      setIsLoading(false)
     }
-    setQuestion('')
   }
 
   async function attachFiles(event) {
@@ -60,7 +96,7 @@ export default function StudyScreen({ study, token, onBack, onDelete, onAbandon,
     <button className="back-button" onClick={onBack}>Voltar para a biblioteca</button>
     <div className="study-hero"><div><span className="goal-symbol">{study?.title?.slice(0, 2).toUpperCase() || 'ES'}</span><small>JORNADA DE ESTUDO</small><h1>{study?.title || 'Estudo'}</h1><p>Próximo passo: <b>{study?.next || 'Começar seu primeiro conteúdo'}</b></p></div><div className="study-score"><b>{study?.progress || 0}%</b><small>concluído</small></div></div>
     <div className="study-actions"><button className="outline-button" onClick={() => onEdit(study)}>Editar dados</button><button className="danger-button" onClick={() => onAbandon(study)}>Desistir do estudo</button><button className="danger-button" onClick={() => onDelete(study)}>Excluir estudo</button></div>
-    <div className="study-columns"><div className="question-card"><div className="question-teacher"><TeacherAvatar /><div><small>TUTOR DESTE ESTUDO</small><b>Estou pronto para ajudar</b></div></div><small>PERGUNTA SOBRE O ESTUDO</small><h2>O que você quer entender?</h2><p>Faça perguntas sobre este estudo. O PDF é opcional.</p><form className="question-form" onSubmit={ask}><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ex.: Explique este assunto de forma simples." required /><label className="attach-button">Anexar PDFs (opcional)<input type="file" accept=".pdf,application/pdf" multiple onChange={attachFiles} /></label>{attachments.length > 0 && <div className="file-list">{attachments.map((file, index) => <div className="file-row" key={`${file}-${index}`}><small className="file-selected">{file}</small><button type="button" className="remove-file" onClick={() => removeAttachment(index)}>Remover</button></div>)}</div>}<button className="primary-button" type="submit">Enviar pergunta <span>→</span></button></form>{answer && <p className="answer-box">{answer}</p>}</div><div className="checklist"><h3>Seu caminho até a meta</h3>{['Introdução', 'Exercícios', 'Revisão final'].map((item, index) => <button type="button" className={`check-item ${index < currentStep ? 'done' : ''} ${index === currentStep ? 'current' : ''}`} key={item} onClick={() => index === 1 ? setQuizActive(true) : setCurrentStep(Math.min(index + 1, 2))}><span>{index < currentStep ? 'Concluído' : index + 1}</span><b>{item}</b>{index === 1 && <small>Fazer quiz</small>}{index !== 1 && index === currentStep && <small>Próximo · avançar</small>}</button>)}</div></div>
+    <div className="study-columns"><div className="question-card"><div className="question-teacher"><TeacherAvatar /><div><small>TUTOR DESTE ESTUDO</small><b>Estou pronto para ajudar</b></div></div><small>PERGUNTA SOBRE O ESTUDO</small><h2>O que você quer entender?</h2><p>Faça perguntas sobre este estudo. O PDF é opcional.</p>{chatMessages.length > 0 && <div className="study-chat">{chatMessages.map((message, index) => <div className={`study-chat-message ${message.role}`} key={`${message.role}-${index}`}><TeacherAvatar student={message.role === 'student'} /><div><small>{message.role === 'student' ? 'Você' : 'Tutor IA'}</small><p>{message.text}</p>{message.role === 'tutor' && <button type="button" className="speak-button" onClick={() => speakAnswer(message.text)}>🔊 Ouvir resposta</button>}</div></div>)}{isLoading && <div className="study-chat-message tutor"><TeacherAvatar /><div><small>Tutor IA</small><p className="typing-feedback"><i /><i /><i /> Analisando seu estudo...</p></div></div>}</div>}<form className="question-form" onSubmit={ask}><div className="question-input-wrap"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ex.: Explique este assunto de forma simples." required /><button type="button" className={`mic-button ${isListening ? 'listening' : ''}`} onClick={toggleMicrophone} aria-label="Falar pergunta">🎙️</button></div><label className="attach-button">Anexar PDFs (opcional)<input type="file" accept=".pdf,application/pdf" multiple onChange={attachFiles} /></label>{attachments.length > 0 && <div className="file-list">{attachments.map((file, index) => <div className="file-row" key={`${file}-${index}`}><small className="file-selected">{file}</small><button type="button" className="remove-file" onClick={() => removeAttachment(index)}>Remover</button></div>)}</div>}<button className="primary-button" type="submit" disabled={isLoading}>{isLoading ? 'Aguardando resposta...' : 'Enviar pergunta'} <span>→</span></button></form>{answer && !chatMessages.length && <p className="answer-box">{answer}</p>}</div><div className="checklist"><h3>Seu caminho até a meta</h3>{['Introdução', 'Exercícios', 'Revisão final'].map((item, index) => <button type="button" className={`check-item ${index < currentStep ? 'done' : ''} ${index === currentStep ? 'current' : ''}`} key={item} onClick={() => index === 1 ? setQuizActive(true) : setCurrentStep(Math.min(index + 1, 2))}><span>{index < currentStep ? 'Concluído' : index + 1}</span><b>{item}</b>{index === 1 && <small>Fazer quiz</small>}{index !== 1 && index === currentStep && <small>Próximo · avançar</small>}</button>)}</div></div>
   </section>
 }
 

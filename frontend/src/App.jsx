@@ -31,7 +31,7 @@ export default function App() {
       localStorage.setItem('studybuddy_user', JSON.stringify(response.user))
       setLoggedIn(true)
     } catch (error) {
-      setAuthError('Ocorreu um erro da nossa parte. Confira seus dados e tente novamente.')
+      setAuthError(error instanceof Error ? error.message : 'Não foi possível criar sua conta.')
     }
   }
   async function handleRegister(user) {
@@ -45,7 +45,7 @@ export default function App() {
       localStorage.setItem('studybuddy_user', JSON.stringify(response.user))
       setLoggedIn(true)
     } catch (error) {
-      setAuthError('Ocorreu um erro da nossa parte. Confira seus dados e tente novamente.')
+      setAuthError(error instanceof Error ? error.message : 'Ocorreu um erro ao cadastrar.')
     }
   }
   function handleLogout() {
@@ -65,5 +65,5 @@ export default function App() {
   function createStudy(newStudy) { const created = { ...newStudy, id: Date.now() }; setCourses((items) => [...items, created]); setStudy(created); setScreen('study') }
   function updateStudy(updated) { setCourses((items) => items.map((item) => item.id === updated.id ? updated : item)); setStudy(updated) }
   function editStudy(selected) { setStudy(selected); setEditId(selected.id); setScreen('library') }
-  return <div className="app"><Sidebar active={screen} onNavigate={setScreen} onLogout={handleLogout} /><main>{screen === 'dashboard' && <Dashboard goals={courses.filter((item) => item.status !== 'Abandonado')} onOpenStudy={openStudy} onNewStudy={() => setScreen('setup')} onEditStudy={editStudy} onAbandonStudy={abandonStudy} />}{screen === 'library' && <LibraryScreen courses={courses} onOpenStudy={(selected) => selected.status === 'Abandonado' ? resumeStudy(selected) : openStudy(selected)} onNewStudy={() => setScreen('setup')} onDelete={removeStudy} onAbandon={abandonStudy} onUpdate={(updated) => { updateStudy(updated); setEditId(null) }} initialEditId={editId} />}{screen === 'setup' && <GoalSetup onBack={() => setScreen('library')} onCreate={createStudy} />}{screen === 'study' && <StudyScreen study={study} token={token} onBack={() => setScreen('library')} onDelete={removeStudy} onAbandon={abandonStudy} onEdit={editStudy} />}{screen === 'account' && <AccountScreen user={user} onSave={(updated) => { setUser(updated); localStorage.setItem('studybuddy_user', JSON.stringify(updated)) }} onChangePassword={() => {}} onLogout={handleLogout} />}</main></div>
+  return <div className="app"><Sidebar active={screen} onNavigate={setScreen} onLogout={handleLogout} /><main>{screen === 'dashboard' && <Dashboard user={user} goals={courses.filter((item) => item.status !== 'Abandonado')} onOpenStudy={openStudy} onNewStudy={() => setScreen('setup')} onEditStudy={editStudy} onAbandonStudy={abandonStudy} />}{screen === 'library' && <LibraryScreen courses={courses} onOpenStudy={(selected) => selected.status === 'Abandonado' ? resumeStudy(selected) : openStudy(selected)} onNewStudy={() => setScreen('setup')} onDelete={removeStudy} onAbandon={abandonStudy} onUpdate={(updated) => { updateStudy(updated); setEditId(null) }} initialEditId={editId} />}{screen === 'setup' && <GoalSetup onBack={() => setScreen('library')} onCreate={createStudy} />}{screen === 'study' && <StudyScreen study={study} token={token} onBack={() => setScreen('library')} onDelete={removeStudy} onAbandon={abandonStudy} onEdit={editStudy} />}{screen === 'account' && <AccountScreen user={user} onSave={(updated) => { setUser(updated); localStorage.setItem('studybuddy_user', JSON.stringify(updated)) }} onChangePassword={() => {}} onLogout={handleLogout} />}</main></div>
 }
