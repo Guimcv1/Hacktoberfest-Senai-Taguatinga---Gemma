@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 
 from pydantic import Field, field_validator
@@ -52,6 +53,11 @@ class Settings(BaseSettings):
         return value.lower().strip()
 
 
+def env_file_path() -> str | None:
+    """APP_ENV_FILE vazio desativa a leitura de arquivo (usado pelos testes)."""
+    return os.getenv("APP_ENV_FILE", ".env") or None
+
+
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings(_env_file=env_file_path())

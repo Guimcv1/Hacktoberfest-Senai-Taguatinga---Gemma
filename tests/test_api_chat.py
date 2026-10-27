@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from app.main import app
 from app.services.ai_client import get_ai_client
 from app.services.document_repo import expire_document
-from app.db.session import SessionLocal
 from tests.fakes import FakeAIClient
 from tests.helpers import build_pdf
 
@@ -100,14 +100,12 @@ def test_chat_unknown_document_returns_404(client: TestClient, auth_headers: dic
     assert response.json()["detail"] == "Documento não encontrado ou expirado."
 
 
-def test_chat_expired_document_returns_404(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_chat_expired_document_returns_404(
+    client: TestClient, auth_headers: dict[str, str], db: Session
+) -> None:
     _enable_fake_ai()
     uploaded = _upload(client, ["Conteudo temporario"], auth_headers)
-    db = SessionLocal()
-    try:
-        expire_document(db, uploaded["document_id"])
-    finally:
-        db.close()
+    expire_document(db, uploaded["document_id"])
 
     response = client.post(
         CHAT_URL,

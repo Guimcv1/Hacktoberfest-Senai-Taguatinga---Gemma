@@ -1,4 +1,5 @@
 import fitz
+from fastapi.testclient import TestClient
 
 
 def build_pdf(pages: list[str]) -> bytes:
@@ -12,3 +13,19 @@ def build_pdf(pages: list[str]) -> bytes:
         return document.tobytes()
     finally:
         document.close()
+
+
+def register_and_login(
+    client: TestClient,
+    email: str,
+    password: str = "senha1234",
+    name: str = "Estudante",
+) -> dict[str, str]:
+    response = client.post(
+        "/api/auth/register",
+        json={"email": email, "password": password, "name": name},
+    )
+    if response.status_code == 409:
+        response = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert response.status_code in {200, 201}, response.text
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
