@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.db.types import UTCDateTime
 
 
 class User(Base):
@@ -15,7 +16,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     name: Mapped[str] = mapped_column(String(120))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime())
 
     documents: Mapped[list[Document]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     conversations: Mapped[list[Conversation]] = relationship(back_populates="owner", cascade="all, delete-orphan")
@@ -32,8 +33,8 @@ class Document(Base):
     page_count: Mapped[int] = mapped_column(Integer)
     text_chars: Mapped[int] = mapped_column(Integer)
     pages_json: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)
 
     owner: Mapped[User] = relationship(back_populates="documents")
     conversations: Mapped[list[Conversation]] = relationship(back_populates="document", cascade="all, delete-orphan")
@@ -46,8 +47,8 @@ class Conversation(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(200), default="Nova conversa")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime())
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime())
 
     owner: Mapped[User] = relationship(back_populates="conversations")
     document: Mapped[Document] = relationship(back_populates="conversations")
@@ -67,7 +68,7 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text)
     sources_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime())
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
@@ -76,4 +77,4 @@ class RevokedToken(Base):
     __tablename__ = "revoked_tokens"
 
     jti: Mapped[str] = mapped_column(String(36), primary_key=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)

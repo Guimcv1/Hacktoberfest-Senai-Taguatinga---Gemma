@@ -54,5 +54,4 @@ def get_current_user(
 
 
 def utcnow() -> datetime:
-    """UTC sem tzinfo para persistência compatível com SQLite."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(timezone.utc)
