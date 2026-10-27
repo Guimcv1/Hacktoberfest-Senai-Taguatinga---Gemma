@@ -1,26 +1,31 @@
 # Virtual environments
 .venv/
 venv/
-env/
+/env/
 
 # Local environment files (keep .env.example)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
+*.egg
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.tox/
+.nox/
+.hypothesis/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 dist/
 build/
-*.egg
 
 # OS / editor
 .DS_Store
@@ -28,10 +33,19 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Local artifacts
+# Local artifacts and databases
 *.log
-uploads/
-tmp/
+/data/
+/uploads/
+/tmp/
 .python-version
-data/
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Private keys and certificates
+*.pem
+*.key
