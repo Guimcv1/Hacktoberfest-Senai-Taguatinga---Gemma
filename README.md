@@ -71,7 +71,8 @@ Clientes antigos que ainda enviam `document_id` no chat continuam funcionando.
 | POST | `/api/documents` | sim | upload PDF (`file`, opcional `conversation_id`) |
 | GET | `/api/documents` | sim | listagem paginada |
 | GET | `/api/documents/{id}` | sim | metadados + páginas |
-| DELETE | `/api/documents/{id}` | sim | exclusão (a conversa permanece) |
+| GET | `/api/documents/{id}/file` | sim | download do PDF original (volume local) |
+| DELETE | `/api/documents/{id}` | sim | exclusão (a conversa permanece; o arquivo no disco também) |
 | POST | `/api/chat` | sim | pergunta (cria conversa se omitido `conversation_id`) |
 | POST | `/api/ai/unload` | sim | descarrega o modelo da memória do Ollama (`keep_alive: 0`) |
 | POST | `/api/conversations` | sim | cria conversa, com ou sem PDF |
@@ -277,17 +278,157 @@ Swagger: `http://127.0.0.1:8000/docs`
 
 ## Banco
 
-Dev (padrão): SQLite. A API aplica as migrações Alembic na inicialização (`DB_AUTO_MIGRATE=true`).
+Desenvolvimento local (sem Docker): SQLite em `./data/studybuddy.db`. A API aplica as migrações Alembic na inicialização (`DB_AUTO_MIGRATE=true`).
 
-PostgreSQL opcional:
-
-```bash
-docker compose up -d postgres
-# DATABASE_URL=postgresql+psycopg2://studybuddy:studybuddy@localhost:5432/studybuddy
-alembic upgrade head
-```
+A implantação Docker usa **PostgreSQL** (veja abaixo). SQLite não é o banco padrão do Compose.
 
 `JWT_SECRET` precisa estar definido para a API carregar. O Alembic usa só `DATABASE_URL`.
+
+PDFs originais ficam em `DOCUMENT_STORAGE_DIR` (padrão `./data/documents`). O texto extraído continua no banco para a recuperação lexical. O nome no disco é `{user_id}/{document_id}.pdf`, sem o nome enviado pelo usuário.
+
+## Implantação Docker
+
+Os arquivos de Compose desta branch **não foram executados nesta máquina** (Docker não está instalado). A implantação precisa ser validada no servidor de destino.
+
+### Estratégia das branches
+
+O código do backend vive em `backend`; o do frontend, em `frontend`. O `docker-compose.yml` constrói cada serviço a partir do GitHub:
+
+- backend: `...Gemma.git#backend`
+- frontend: `...Gemma.git#frontend:frontend` (subpasta `frontend/` da branch `frontend`)
+
+Assim não é necessário ter as duas árvores no mesmo checkout. O servidor precisa conseguir clonar o repositório durante o `docker compose build`.
+
+Para construir a partir do disco local, defina no `.env`:
+
+```bash
+# neste checkout da branch backend:
+BACKEND_CONTEXT=.
+FRONTEND_CONTEXT=https://github.com/Guimcv1/Hacktoberfest-Senai-Taguatinga---Gemma.git#frontend:frontend
+```
+
+Não altere `main`. Não use `docker compose down -v` na atualização normal.
+
+### Arquitetura
+
+```text
+navegador --> :8080 frontend (Nginx)
+                 ├─ /        UI
+                 └─ /api     proxy --> backend:8000 (1 worker)
+                                    ├─ postgres (volume pgdata)
+                                    ├─ /data/documents (volume documents)
+                                    └─ ollama:11434 (volume ollama)
+```
+
+PostgreSQL e Ollama **não** têm porta publicada por padrão.
+
+O backend sobe com **um único worker**. Não escale o serviço `backend`. O cadeado de `POST /api/ai/unload` é só neste processo; não coordena outras réplicas. O unload é global para quem compartilha o mesmo Ollama e **não** apaga os arquivos do modelo.
+
+### Pré-requisitos no servidor
+
+- Docker Engine e Docker Compose v2
+- Rede para clonar o GitHub no build e para o primeiro `ollama pull`
+- Disco para o modelo Gemma 4 E4B (vários gigabytes) + PDFs + PostgreSQL
+- RAM suficiente para carregar `gemma4:e4b` em CPU (confira no hardware; não há garantia de desempenho aqui)
+- GPU é **opcional** e depende de drivers NVIDIA/AMD no host; a configuração básica é CPU
+
+### Configuração inicial
+
+```bash
+git clone -b backend https://github.com/Guimcv1/Hacktoberfest-Senai-Taguatinga---Gemma.git studybuddy
+cd studybuddy
+cp .env.example .env
+# edite JWT_SECRET (32+ caracteres, não use o exemplo público)
+# edite POSTGRES_PASSWORD (evite @ : / na senha; entra na URL do SQLAlchemy)
+# CORS_ORIGINS=http://SEU_HOST:8080  se não for localhost
+```
+
+### Build e inicialização
+
+```bash
+docker compose build
+docker compose up -d
+docker compose ps
+docker compose logs -f backend
+```
+
+O entrypoint do backend roda `alembic upgrade head` **antes** de publicar a API. `DB_AUTO_MIGRATE=false` no Compose para não haver duas rotinas de migração. Não apaga um banco existente.
+
+### Modelo Gemma 4 E4B (manual)
+
+A API **não** executa `ollama pull`. Depois dos contêineres saudáveis:
+
+```bash
+docker compose exec ollama ollama pull gemma4:e4b
+docker compose exec ollama ollama list
+```
+
+A primeira inferência (e a primeira após unload) pode demorar enquanto o modelo entra na memória.
+
+### Verificar serviços
+
+```bash
+curl -sS http://localhost:8080/
+curl -sS http://localhost:8080/health
+docker compose exec backend python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health').read())"
+docker compose logs postgres
+docker compose logs ollama
+```
+
+A UI fala com o backend pela **mesma origem** (`/api` no Nginx). O navegador não usa o hostname interno `backend`.
+
+### Atualizar sem apagar dados
+
+```bash
+git pull origin backend
+docker compose build
+docker compose up -d
+```
+
+Isso recria **contêineres**, não volumes. **Não** use `docker compose down -v`.
+
+| Ação | O que acontece |
+| --- | --- |
+| `docker compose stop` / `start` | para/inicia; volumes intactos |
+| `docker compose up -d --build` | nova imagem; volumes intactos; migrações sobem se houver revisão nova |
+| `ollama pull gemma4:e4b` | baixa/atualiza pesos no volume `ollama` |
+| `docker compose down -v` | **apaga** PostgreSQL, PDFs e modelos |
+
+### Volumes
+
+| Volume | Dados |
+| --- | --- |
+| `pgdata` | usuários, conversas, mensagens, questões, texto extraído |
+| `documents` | PDFs originais |
+| `ollama` | arquivos do modelo |
+
+Volumes **não** são backup. Recomendação (não executada aqui):
+
+```bash
+docker compose exec postgres pg_dump -U studybuddy studybuddy > backup.sql
+docker compose cp backend:/data/documents ./backup-documents
+```
+
+Restauração: `psql` no dump e cópia dos PDFs de volta para o volume, com o Compose no ar. Teste o procedimento no servidor antes de precisar dele.
+
+### Parar
+
+```bash
+docker compose stop      # mantém volumes
+docker compose down      # remove contêineres e rede; mantém volumes nomeados
+```
+
+### Diagnóstico
+
+- Backend não sobe: `docker compose logs backend` — JWT_SECRET, senha do Postgres na URL, migração.
+- Postgres unhealthy: senha/usuário do `.env` diferentes dos do volume já criado (a senha inicial só vale na **primeira** criação do volume).
+- Ollama unreachable: logs do serviço; `AI_BASE_URL` deve ser `http://ollama:11434` na rede do Compose.
+- 503 na IA: modelo não puxado, ou primeira carga ainda em andamento.
+- Unload 409: há inferência neste processo; aguarde.
+
+### CPU / GPU
+
+A configuração publicada não exige GPU. Aceleração NVIDIA exigiria Compose com `deploy.resources.reservations.devices` e NVIDIA Container Toolkit no host — isso **não** foi validado aqui.
 
 ## Testes
 
@@ -300,10 +441,11 @@ A suíte usa SQLite em memória e **mock da IA**. Não depende do túnel.
 ## Limitações
 
 - Prompt injection em PDFs não pode ser eliminada por completo; o conteúdo é tratado como material de estudo, não como instrução de sistema.
-- Sem OCR, embeddings, avatar, voz ou S3/MinIO (arquivos originais não são gravados; só o texto extraído).
+- Sem OCR, embeddings, avatar, voz ou S3/MinIO. Os PDFs originais ficam no disco local (`DOCUMENT_STORAGE_DIR`); o texto extraído permanece no banco.
 - Rate limit em memória por processo; não compartilha entre workers.
 - JWT sem refresh; logout só invalida o `jti` apresentado.
 - O histórico enviado ao modelo é truncado por `MAX_CONTEXT_CHARS`; mensagens antigas podem ficar de fora do prompt, mas permanecem no banco.
 - A qualidade pedagógica das questões depende do Gemma 4 E4B; a suíte de testes usa mock da IA e não valida o modelo real.
-- O unload manual só coordena inferências **neste processo**. Com vários workers, um unload pode coincidir com uma inferência em outro worker.
+- O unload manual só coordena inferências **neste processo**. O Compose usa 1 worker de propósito. Com várias réplicas, um unload pode coincidir com uma inferência em outro worker.
+- A stack Docker foi **preparada, não executada** neste ambiente (sem Docker instalado).
 - Só há múltipla escolha (A–D) nesta versão; outros tipos de questão ainda não estão implementados.

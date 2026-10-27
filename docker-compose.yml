@@ -1,20 +1,102 @@
-# Desenvolvimento local opcional. Não é um ambiente de produção.
+# StudyBuddy AI — implantação. Constrói backend e frontend a partir das branches
+# do GitHub, porque o código não vive no mesmo tree.
+# Sobrescreva BACKEND_CONTEXT / FRONTEND_CONTEXT no .env para build local.
+
+name: studybuddy
+
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: studybuddy
-      POSTGRES_USER: studybuddy
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-studybuddy}
-    ports:
-      - "127.0.0.1:5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U studybuddy -d studybuddy"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      POSTGRES_USER: ${POSTGRES_USER:-studybuddy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: ${POSTGRES_DB:-studybuddy}
     volumes:
-      - studybuddy_pg:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-studybuddy} -d ${POSTGRES_DB:-studybuddy}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    # Porta não publicada de propósito.
+
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.40.11}
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-120s}
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
+    # Porta não publicada de propósito. GPU é opcional; veja o README.
+
+  backend:
+    build:
+      context: ${BACKEND_CONTEXT:-https://github.com/Guimcv1/Hacktoberfest-Senai-Taguatinga---Gemma.git#backend}
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: production
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
+      JWT_EXPIRES_MINUTES: ${JWT_EXPIRES_MINUTES:-480}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-studybuddy}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-studybuddy}
+      DB_AUTO_MIGRATE: "false"
+      AI_BASE_URL: http://ollama:11434
+      AI_MODEL: ${AI_MODEL:-gemma4:e4b}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-120}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-120s}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      DOCUMENT_STORAGE_DIR: /data/documents
+      DOCUMENT_TTL_MINUTES: ${DOCUMENT_TTL_MINUTES:-10080}
+      MAX_PDF_SIZE_MB: ${MAX_PDF_SIZE_MB:-10}
+      MAX_PDF_PAGES: ${MAX_PDF_PAGES:-50}
+    volumes:
+      - documents:/data/documents
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 8
+      start_period: 40s
+    # Um worker: o cadeado de unload é por processo.
+
+  frontend:
+    build:
+      context: ${FRONTEND_CONTEXT:-https://github.com/Guimcv1/Hacktoberfest-Senai-Taguatinga---Gemma.git#frontend:frontend}
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${PUBLISH_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
 
 volumes:
-  studybuddy_pg:
+  pgdata:
+  documents:
+  ollama:
