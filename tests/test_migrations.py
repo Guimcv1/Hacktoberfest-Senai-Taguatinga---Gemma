@@ -58,6 +58,21 @@ def test_upgrade_creates_schema_identical_to_models(file_engine) -> None:
     assert _schema_diff(file_engine) == []
 
 
+def test_upgrade_from_003_adds_document_storage_relpath(file_engine) -> None:
+    config = alembic_config()
+    with file_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "003")
+
+    columns = {column["name"] for column in inspect(file_engine).get_columns("documents")}
+    assert "storage_relpath" not in columns
+    upgrade_database(file_engine)
+    columns = {column["name"] for column in inspect(file_engine).get_columns("documents")}
+    assert "storage_relpath" in columns
+    assert current_revision(file_engine) == head_revision()
+    assert _schema_diff(file_engine) == []
+
+
 def test_upgrade_from_002_adds_question_sets(file_engine) -> None:
     config = alembic_config()
     with file_engine.begin() as connection:

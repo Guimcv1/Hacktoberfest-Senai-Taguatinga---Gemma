@@ -54,13 +54,21 @@ def upgrade_database(engine: Engine) -> None:
     config = alembic_config()
     with engine.begin() as connection:
         config.attributes["connection"] = connection
-        tables = set(inspect(connection).get_table_names())
+        inspector = inspect(connection)
+        tables = set(inspector.get_table_names())
         if "alembic_version" not in tables:
             existing = _BASELINE_TABLES & tables
             if existing == _BASELINE_TABLES:
                 # create_all de versões novas já inclui tabelas posteriores à 001.
-                if "question_sets" in tables:
+                document_cols = (
+                    {column["name"] for column in inspector.get_columns("documents")}
+                    if "documents" in tables
+                    else set()
+                )
+                if "storage_relpath" in document_cols:
                     revision = head_revision()
+                elif "question_sets" in tables:
+                    revision = "003"
                 elif "conversation_documents" in tables:
                     revision = "002"
                 else:

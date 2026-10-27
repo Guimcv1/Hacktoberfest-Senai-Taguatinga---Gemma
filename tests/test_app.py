@@ -20,6 +20,7 @@ def test_app_initializes() -> None:
     assert "get" in schema["paths"]["/health"]
     assert "/api/documents" in schema["paths"]
     assert "post" in schema["paths"]["/api/documents"]
+    assert "/api/documents/{document_id}/file" in schema["paths"]
     assert "/api/chat" in schema["paths"]
     assert "post" in schema["paths"]["/api/chat"]
     assert "/api/auth/register" in schema["paths"]

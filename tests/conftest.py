@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Iterator
 
 os.environ.update(
@@ -10,6 +11,7 @@ os.environ.update(
         "JWT_SECRET": "test-jwt-secret-key-with-at-least-32-chars",
         "DATABASE_URL": os.environ.get("TEST_DATABASE_URL", "sqlite://"),
         "AI_BASE_URL": "",
+        "DOCUMENT_STORAGE_DIR": tempfile.mkdtemp(prefix="studybuddy-docs-"),
         "RATE_LIMIT_PER_MINUTE": "0",
         "RATE_LIMIT_AUTH_PER_MINUTE": "0",
         "CORS_ORIGINS": "http://localhost:5173,http://testserver",

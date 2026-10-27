@@ -19,6 +19,7 @@ class DocumentUploadResponse(BaseModel):
     page_count: int = Field(ge=1, description="Quantidade de páginas do PDF.")
     pages: list[ExtractedPage]
     deduplicated: bool = False
+    stored_file: bool = False
     conversation_id: str | None = Field(default=None, description="Conversa à qual o PDF foi anexado, se informada.")
 
 
@@ -27,6 +28,7 @@ class DocumentMeta(BaseModel):
     filename: str
     page_count: int
     text_chars: int
+    stored_file: bool = False
     created_at: datetime
     expires_at: datetime
 

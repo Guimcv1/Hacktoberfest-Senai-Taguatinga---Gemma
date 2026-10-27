@@ -52,6 +52,7 @@ class Document(Base):
     page_count: Mapped[int] = mapped_column(Integer)
     text_chars: Mapped[int] = mapped_column(Integer)
     pages_json: Mapped[str] = mapped_column(Text)
+    storage_relpath: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime())
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)
 

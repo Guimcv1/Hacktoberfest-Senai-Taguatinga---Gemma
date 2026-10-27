@@ -9,10 +9,11 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.deps import utcnow
 from app.db.models import Conversation, Document, conversation_documents
 from app.schemas.documents import ExtractedDocument, ExtractedPage
+from app.services.document_files import delete_pdf, write_pdf
 
 
 class DocumentAccessError(Exception):
@@ -63,8 +64,10 @@ def purge_expired(db: Session, user_id: str | None = None) -> int:
     if user_id is not None:
         query = query.where(Document.user_id == user_id)
     rows = db.scalars(query).all()
+    settings = get_settings()
     for row in rows:
         unlink_document_from_conversations(db, row.id)
+        delete_pdf(settings, row.storage_relpath)
         db.delete(row)
     db.commit()
     return len(rows)
@@ -88,10 +91,15 @@ def save_document(
     extracted: ExtractedDocument,
     file_hash: str,
     settings: Settings,
+    content: bytes | None = None,
 ) -> tuple[Document, bool]:
     purge_expired(db, user_id)
     existing = _find_by_hash(db, user_id, file_hash)
     if existing is not None:
+        if content and not existing.storage_relpath:
+            existing.storage_relpath = write_pdf(settings, user_id, existing.id, content)
+            db.commit()
+            db.refresh(existing)
         return existing, True
 
     incoming_chars = sum(len(page.text) for page in extracted.pages)
@@ -114,19 +122,30 @@ def save_document(
         page_count=extracted.page_count,
         text_chars=incoming_chars,
         pages_json=json.dumps([page.model_dump() for page in extracted.pages], ensure_ascii=False),
+        storage_relpath=None,
         created_at=now,
         expires_at=now + timedelta(seconds=settings.document_ttl_seconds),
     )
     db.add(row)
     try:
+        db.flush()
+        if content:
+            row.storage_relpath = write_pdf(settings, user_id, row.id, content)
         db.commit()
     except IntegrityError:
         # O mesmo PDF enviado duas vezes ao mesmo tempo: a restrição única mantém um só.
         db.rollback()
+        if content and row.id:
+            delete_pdf(settings, f"{user_id}/{row.id}.pdf")
         existing = _find_by_hash(db, user_id, file_hash)
         if existing is None:
             raise
         return existing, True
+    except Exception:
+        db.rollback()
+        if row.id:
+            delete_pdf(settings, f"{user_id}/{row.id}.pdf")
+        raise
     db.refresh(row)
     return row, False
 
@@ -154,9 +173,11 @@ def list_documents(db: Session, user_id: str, *, limit: int, offset: int) -> tup
 
 def delete_document(db: Session, user_id: str, document_id: str) -> None:
     row = get_owned_document(db, user_id, document_id)
+    relative = row.storage_relpath
     unlink_document_from_conversations(db, row.id)
     db.delete(row)
     db.commit()
+    delete_pdf(get_settings(), relative)
 
 
 def expire_document(db: Session, document_id: str) -> None:

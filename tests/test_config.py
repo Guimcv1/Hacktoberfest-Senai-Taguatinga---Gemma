@@ -78,6 +78,13 @@ def test_environment_is_normalized_and_validated() -> None:
         _settings(environment="prod")
 
 
+def test_document_storage_dir_has_local_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DOCUMENT_STORAGE_DIR", raising=False)
+    assert _settings().document_storage_dir == "./data/documents"
+    with pytest.raises(ValueError):
+        _settings(document_storage_dir="  ")
+
+
 def test_default_ai_model_is_official_gemma4_e4b() -> None:
     assert DEFAULT_AI_MODEL == "gemma4:e4b"
     assert _settings().ai_model == "gemma4:e4b"

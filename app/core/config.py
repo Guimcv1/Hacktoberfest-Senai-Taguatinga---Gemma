@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     document_ttl_minutes: int = Field(default=10_080, ge=1)
     max_stored_documents: int = Field(default=50, ge=1)
     max_stored_text_chars: int = Field(default=2_000_000, ge=1000)
+    document_storage_dir: str = Field(
+        default="./data/documents",
+        description="Diretório local dos PDFs originais. No Docker: /data/documents.",
+    )
     max_chat_message_chars: int = Field(default=2000, ge=50)
     max_retrieval_pages: int = Field(default=3, ge=1)
     max_context_chars: int = Field(default=6000, ge=200)
@@ -119,6 +123,16 @@ class Settings(BaseSettings):
         if _OLLAMA_DURATION.fullmatch(value):
             return value
         raise ValueError("use uma duração do Ollama, por exemplo 120s, 2m, 0 ou -1.")
+
+    @field_validator("document_storage_dir", mode="before")
+    @classmethod
+    def validate_document_storage_dir(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        value = value.strip()
+        if not value:
+            raise ValueError("defina o diretório de armazenamento dos PDFs.")
+        return value
 
     @field_validator("ai_model", mode="before")
     @classmethod

@@ -6,6 +6,7 @@ import logging
 from typing import BinaryIO
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -32,6 +33,7 @@ from app.services.document_repo import (
     save_document,
 )
 from app.schemas.ids import optional_id
+from app.services.document_files import read_pdf
 from app.services.conversations import ConversationNotFoundError, attach_document
 from app.services.documents import (
     DocumentProcessingError,
@@ -60,6 +62,7 @@ def _meta(row) -> DocumentMeta:
         filename=row.filename,
         page_count=row.page_count,
         text_chars=row.text_chars,
+        stored_file=bool(row.storage_relpath),
         created_at=row.created_at,
         expires_at=row.expires_at,
     )
@@ -98,6 +101,7 @@ def upload_document(
             extracted=extracted,
             file_hash=content_hash(content),
             settings=settings,
+            content=content,
         )
     except DocumentProcessingError as exc:
         raise HTTPException(
@@ -130,6 +134,7 @@ def upload_document(
         page_count=stored.page_count,
         pages=pages_from_json(stored.pages_json) if deduplicated else extracted.pages,
         deduplicated=deduplicated,
+        stored_file=bool(stored.storage_relpath),
         conversation_id=attached_conversation_id,
     )
 
@@ -157,6 +162,37 @@ def get_document(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
     extracted = extracted_from_row(row)
     return DocumentDetail(**_meta(row).model_dump(), pages=extracted.pages)
+
+
+@router.get("/documents/{document_id}/file", summary="Baixar o PDF original")
+def download_document(
+    document_id: str,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    try:
+        row = get_owned_document(db, current_user.id, document_id)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
+    if not row.storage_relpath:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="O arquivo original deste documento não está disponível.",
+        )
+    try:
+        path = read_pdf(settings, row.storage_relpath)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="O arquivo original deste documento não está disponível.",
+        ) from None
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=sanitize_filename(row.filename),
+        content_disposition_type="attachment",
+    )
 
 
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)

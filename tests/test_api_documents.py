@@ -181,3 +181,32 @@ def test_upload_requires_authentication(client: TestClient) -> None:
         files={"file": ("material.pdf", build_pdf(["Texto"]), "application/pdf")},
     )
     assert response.status_code == 401
+
+
+def test_download_returns_original_pdf_and_delete_removes_file(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    original = build_pdf(["Arquivo original persistido"])
+    uploaded = _post_file(client, original, auth_headers)
+    assert uploaded.status_code == 201
+    assert uploaded.json()["stored_file"] is True
+    document_id = uploaded.json()["document_id"]
+
+    downloaded = client.get(f"/api/documents/{document_id}/file", headers=auth_headers)
+    assert downloaded.status_code == 200
+    assert downloaded.content.startswith(b"%PDF")
+    assert original[:8] == downloaded.content[:8]
+
+    deleted = client.delete(f"/api/documents/{document_id}", headers=auth_headers)
+    assert deleted.status_code == 204
+    missing = client.get(f"/api/documents/{document_id}/file", headers=auth_headers)
+    assert missing.status_code == 404
+
+
+def test_download_is_isolated_by_user(client: TestClient, auth_headers: dict[str, str]) -> None:
+    from tests.helpers import register_and_login
+
+    uploaded = _post_file(client, build_pdf(["Segredo"]), auth_headers)
+    other = register_and_login(client, "outro-docs@example.com")
+    response = client.get(f"/api/documents/{uploaded.json()['document_id']}/file", headers=other)
+    assert response.status_code == 404
