@@ -15,41 +15,37 @@ from app.db.session import get_db
 _bearer = HTTPBearer(auto_error=False)
 
 
+def _unauthorized(detail: str = "Token inválido ou expirado.") -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> User:
     if credentials is None or credentials.scheme.lower() != "bearer":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Autenticação obrigatória.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise _unauthorized("Autenticação obrigatória.")
     try:
         payload = decode_access_token(credentials.credentials, settings)
     except InvalidTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token inválido ou expirado.",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from None
-
-    if payload.get("type") != "access":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido ou expirado.")
+        raise _unauthorized() from None
 
     jti = payload.get("jti")
     user_id = payload.get("sub")
-    if not jti or not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido ou expirado.")
+    if payload.get("type") != "access" or not jti or not user_id:
+        raise _unauthorized()
 
-    revoked = db.get(RevokedToken, jti)
-    if revoked is not None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sessão encerrada. Entre novamente.")
+    if db.get(RevokedToken, jti) is not None:
+        raise _unauthorized("Sessão encerrada. Entre novamente.")
 
     user = db.get(User, user_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido ou expirado.")
+        raise _unauthorized()
     return user
 
 
