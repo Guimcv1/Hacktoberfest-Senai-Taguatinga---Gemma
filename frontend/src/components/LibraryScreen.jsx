@@ -1,10 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export const initialCourses = [
-  { id: 1, title: 'Fundamentos de redes', detail: 'Prova em 18 dias', progress: 68, method: 'Sessões focadas', color: 'green', status: 'Ativo', next: 'Revisar camada de transporte' },
-  { id: 2, title: 'JavaScript moderno', detail: 'Meta pessoal', progress: 42, method: 'Aprender fazendo', color: 'purple', status: 'Ativo', next: 'Praticar funções assíncronas' },
-  { id: 3, title: 'Inglês técnico', detail: 'Meta pessoal', progress: 25, method: 'Revisão espaçada', color: 'orange', status: 'Ativo', next: 'Revisar termos técnicos' },
-]
+export const initialCourses = []
 
 export default function LibraryScreen({ courses, onOpenStudy, onNewStudy, onDelete, onAbandon, onUpdate, initialEditId }) {
   const [editing, setEditing] = useState(initialEditId || null)
