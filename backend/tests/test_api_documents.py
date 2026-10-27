@@ -1,0 +1,212 @@
+import inspect
+import uuid
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+
+from app.api.routes.documents import upload_document
+from tests.helpers import build_encrypted_pdf, build_pdf, override_settings
+
+UPLOAD_URL = "/api/documents"
+
+
+def _post_file(
+    client: TestClient,
+    content: bytes,
+    auth_headers: dict[str, str],
+    filename: str = "material.pdf",
+    content_type: str = "application/pdf",
+):
+    return client.post(
+        UPLOAD_URL,
+        files={"file": (filename, content, content_type)},
+        headers=auth_headers,
+    )
+
+
+def test_upload_valid_pdf_returns_extracted_pages(client: TestClient, auth_headers: dict[str, str]) -> None:
+    content = build_pdf(["Texto da primeira pagina", "Texto da segunda pagina"])
+
+    response = _post_file(client, content, auth_headers, filename="material.pdf")
+
+    assert response.status_code == 201
+    payload = response.json()
+    uuid.UUID(payload["document_id"])
+    assert payload["filename"] == "material.pdf"
+    assert payload["page_count"] == 2
+    assert payload["pages"][0]["page_number"] == 1
+    assert "Texto da primeira pagina" in payload["pages"][0]["text"]
+    assert payload["pages"][1]["page_number"] == 2
+    assert "Texto da segunda pagina" in payload["pages"][1]["text"]
+
+
+def test_upload_preserves_page_numbers(client: TestClient, auth_headers: dict[str, str]) -> None:
+    content = build_pdf(["Pagina A", "Pagina B", "Pagina C"])
+
+    payload = _post_file(client, content, auth_headers).json()
+
+    assert [page["page_number"] for page in payload["pages"]] == [1, 2, 3]
+
+
+def test_upload_rejects_non_pdf_even_with_pdf_name_and_mime(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    response = _post_file(
+        client,
+        b"isto nao e um pdf",
+        auth_headers,
+        filename="material.pdf",
+        content_type="application/pdf",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Arquivo PDF inválido."
+
+
+def test_upload_rejects_corrupted_pdf(client: TestClient, auth_headers: dict[str, str]) -> None:
+    valid = build_pdf(["Conteudo"])
+    corrupted = valid[:24]
+
+    response = _post_file(client, corrupted, auth_headers, filename="quebrado.pdf")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Arquivo PDF inválido."
+
+
+def test_upload_rejects_pdf_without_extractable_text(client: TestClient, auth_headers: dict[str, str]) -> None:
+    content = build_pdf(["", ""])
+
+    response = _post_file(client, content, auth_headers)
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "O PDF não contém texto extraível."
+
+
+def test_upload_rejects_file_above_size_limit(client: TestClient, auth_headers: dict[str, str]) -> None:
+    override_settings(max_pdf_size_mb=1)
+    content = b"%PDF-1.4\n" + b"0" * (1024 * 1024)
+
+    response = _post_file(client, content, auth_headers)
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Arquivo excede o tamanho máximo permitido."
+
+
+def test_upload_does_not_depend_on_ai(client: TestClient, auth_headers: dict[str, str]) -> None:
+    import app.api.routes.documents as documents_route
+
+    source = inspect.getsource(documents_route)
+    assert "ai_client" not in source
+    assert "generate_explanation" not in source
+    assert "get_ai_client" not in source
+
+    content = build_pdf(["Texto independente da IA"])
+    with (
+        patch("app.services.ai_client.AIClient.generate_explanation") as mock_infer,
+        patch("app.services.ai_client.get_ai_client") as mock_factory,
+    ):
+        response = _post_file(client, content, auth_headers)
+
+    assert response.status_code == 201
+    mock_infer.assert_not_called()
+    mock_factory.assert_not_called()
+
+
+def test_upload_accepts_valid_pdf_with_unrelated_mime_type(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    content = build_pdf(["Conteudo real de PDF"])
+
+    response = _post_file(
+        client,
+        content,
+        auth_headers,
+        filename="notas.bin",
+        content_type="text/plain",
+    )
+
+    assert response.status_code == 201
+    assert response.json()["filename"] == "notas.bin"
+
+
+def test_upload_sanitizes_filename(client: TestClient, auth_headers: dict[str, str]) -> None:
+    response = _post_file(client, build_pdf(["Texto"]), auth_headers, filename="C:\\fakepath\\aula\u202e.pdf")
+
+    assert response.status_code == 201
+    assert response.json()["filename"] == "aula.pdf"
+
+
+def test_upload_rejects_too_many_pages(client: TestClient, auth_headers: dict[str, str]) -> None:
+    override_settings(max_pdf_pages=2)
+
+    response = _post_file(client, build_pdf(["1", "2", "3"]), auth_headers)
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "O PDF excede o limite de páginas."
+
+
+def test_upload_rejects_pdf_with_opening_password(client: TestClient, auth_headers: dict[str, str]) -> None:
+    response = _post_file(client, build_encrypted_pdf(["Texto"], user_password="leitor"), auth_headers)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "PDF protegido por senha não é suportado."
+
+
+def test_upload_quota_returns_507_with_actionable_message(client: TestClient, auth_headers: dict[str, str]) -> None:
+    override_settings(max_stored_documents=1)
+    assert _post_file(client, build_pdf(["Primeiro"]), auth_headers).status_code == 201
+
+    response = _post_file(client, build_pdf(["Segundo"]), auth_headers)
+
+    assert response.status_code == 507
+    assert "Exclua documentos antigos" in response.json()["detail"]
+
+
+def test_upload_text_above_user_quota_returns_413(client: TestClient, auth_headers: dict[str, str]) -> None:
+    override_settings(max_stored_text_chars=1000)
+
+    response = _post_file(client, build_pdf(["Texto de estudo " * 5] * 15), auth_headers)
+
+    assert response.status_code == 413
+    assert "texto extraído" in response.json()["detail"]
+
+
+def test_upload_endpoint_runs_in_threadpool() -> None:
+    assert not inspect.iscoroutinefunction(upload_document)
+
+
+def test_upload_requires_authentication(client: TestClient) -> None:
+    response = client.post(
+        UPLOAD_URL,
+        files={"file": ("material.pdf", build_pdf(["Texto"]), "application/pdf")},
+    )
+    assert response.status_code == 401
+
+
+def test_download_returns_original_pdf_and_delete_removes_file(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    original = build_pdf(["Arquivo original persistido"])
+    uploaded = _post_file(client, original, auth_headers)
+    assert uploaded.status_code == 201
+    assert uploaded.json()["stored_file"] is True
+    document_id = uploaded.json()["document_id"]
+
+    downloaded = client.get(f"/api/documents/{document_id}/file", headers=auth_headers)
+    assert downloaded.status_code == 200
+    assert downloaded.content.startswith(b"%PDF")
+    assert original[:8] == downloaded.content[:8]
+
+    deleted = client.delete(f"/api/documents/{document_id}", headers=auth_headers)
+    assert deleted.status_code == 204
+    missing = client.get(f"/api/documents/{document_id}/file", headers=auth_headers)
+    assert missing.status_code == 404
+
+
+def test_download_is_isolated_by_user(client: TestClient, auth_headers: dict[str, str]) -> None:
+    from tests.helpers import register_and_login
+
+    uploaded = _post_file(client, build_pdf(["Segredo"]), auth_headers)
+    other = register_and_login(client, "outro-docs@example.com")
+    response = client.get(f"/api/documents/{uploaded.json()['document_id']}/file", headers=other)
+    assert response.status_code == 404

@@ -1,4 +1,8 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+<<<<<<< HEAD
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
+=======
+const API_URL = import.meta.env.VITE_API_URL ?? ''
+>>>>>>> e10bbaba10e3d0af0f7636072277845496b3bb03
 
 async function request(path, options = {}) {
   const headers = new Headers(options.headers)
@@ -18,7 +22,11 @@ async function request(path, options = {}) {
     let message = ''
     try {
       const body = await response.json()
-      message = body.detail || body.message || ''
+      if (Array.isArray(body.errors) && body.errors.length > 0) {
+        message = body.errors.map((e) => (e.field ? `${e.field}: ${e.message}` : e.message)).join(' | ')
+      } else {
+        message = body.detail || body.message || ''
+      }
     } catch {
       message = ''
     }
@@ -90,5 +98,12 @@ export function askQuestion(token, payload) {
     path: '/api/chat',
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export function unloadModel(token) {
+  return authorized(token, {
+    path: '/api/ai/unload',
+    method: 'POST',
   })
 }
