@@ -173,6 +173,34 @@ def test_redirects_are_not_followed() -> None:
     assert [request.url.host for request in recorded] == ["ai.test"]
 
 
+def test_ping_hits_the_root_without_sending_material() -> None:
+    recorded: list[httpx.Request] = []
+    client = _recording_client(recorded, httpx.Response(200, text="Ollama is running"))
+
+    assert asyncio.run(client.ping()) is True
+    assert recorded[0].method == "GET"
+    assert recorded[0].url.path == "/"
+    assert recorded[0].content == b""
+
+
+@pytest.mark.parametrize(
+    "response",
+    [httpx.Response(503), httpx.Response(307, headers={"Location": "http://outro-host.test/"})],
+)
+def test_ping_fails_on_error_or_redirect(response: httpx.Response) -> None:
+    assert asyncio.run(_recording_client([], response).ping()) is False
+
+
+def test_ping_fails_when_offline_or_not_configured() -> None:
+    def offline(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline")
+
+    offline_client = AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(offline))
+
+    assert asyncio.run(offline_client.ping()) is False
+    assert asyncio.run(AIClient("", 5.0, "gemma3:4b").ping()) is False
+
+
 @pytest.mark.parametrize("status_code", [504, 524])
 def test_gateway_timeouts_are_reported_as_timeouts(status_code: int) -> None:
     client = _recording_client([], httpx.Response(status_code, text="timeout"))

@@ -93,6 +93,22 @@ class AIClient:
     def is_configured(self) -> bool:
         return bool(self._base_url)
 
+    async def ping(self, timeout_seconds: float = 5.0) -> bool:
+        """GET na raiz do Ollama ("Ollama is running"), sem enviar prompt nem documento."""
+        if not self.is_configured():
+            return False
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(timeout_seconds),
+                transport=self._transport,
+                follow_redirects=False,
+            ) as client:
+                response = await client.get(f"{self._base_url}/")
+        except httpx.HTTPError:
+            logger.warning("IA não respondeu à verificação de disponibilidade.")
+            return False
+        return response.status_code == 200
+
     async def generate_explanation(
         self,
         *,

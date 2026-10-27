@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from pathlib import Path
 
 from alembic import command
@@ -10,7 +11,7 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 logger = logging.getLogger("studybuddy")
 
@@ -30,13 +31,18 @@ def alembic_config() -> Config:
     return config
 
 
+@lru_cache(maxsize=1)
 def head_revision() -> str | None:
     return ScriptDirectory.from_config(alembic_config()).get_current_head()
 
 
+def revision_of_connection(connection: Connection) -> str | None:
+    return MigrationContext.configure(connection).get_current_revision()
+
+
 def current_revision(engine: Engine) -> str | None:
     with engine.connect() as connection:
-        return MigrationContext.configure(connection).get_current_revision()
+        return revision_of_connection(connection)
 
 
 def upgrade_database(engine: Engine) -> None:

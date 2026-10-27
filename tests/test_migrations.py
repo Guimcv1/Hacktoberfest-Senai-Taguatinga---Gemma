@@ -156,5 +156,3 @@ def test_migrations_on_configured_test_database() -> None:
 
     assert current_revision(engine) == head_revision()
     assert _schema_diff(engine) == []
-    with engine.begin() as connection:
-        connection.execute(text("DROP TABLE IF EXISTS alembic_version"))
