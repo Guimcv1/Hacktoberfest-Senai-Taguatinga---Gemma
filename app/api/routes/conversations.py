@@ -12,28 +12,38 @@ from app.schemas.chat import (
     ChatSource,
     ConversationCreate,
     ConversationDetail,
+    ConversationDocumentAttach,
     ConversationListResponse,
     ConversationMessage,
     ConversationSummary,
 )
 from app.services.conversations import (
     ConversationNotFoundError,
+    attach_document,
     clear_messages,
     create_conversation,
     delete_conversation,
     get_owned_conversation,
     list_conversations,
     message_count,
+    sync_primary_document,
 )
 from app.services.document_repo import DocumentNotFoundError
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
 
+def _document_ids(row) -> list[str]:
+    sync_primary_document(row)
+    return [document.id for document in row.documents]
+
+
 def _summary(row, count: int) -> ConversationSummary:
+    ids = _document_ids(row)
     return ConversationSummary(
         id=row.id,
         document_id=row.document_id,
+        document_ids=ids,
         title=row.title,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -62,16 +72,17 @@ def _messages(row) -> list[ConversationMessage]:
 
 @router.post("", response_model=ConversationSummary, status_code=status.HTTP_201_CREATED)
 def start_conversation(
-    payload: ConversationCreate,
+    payload: ConversationCreate | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ConversationSummary:
+    body = payload or ConversationCreate()
     try:
         row = create_conversation(
             db,
             user_id=current_user.id,
-            document_id=payload.document_id,
-            title=payload.title,
+            document_id=body.document_id,
+            title=body.title,
         )
     except DocumentNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
@@ -98,10 +109,33 @@ def get_conversation(
 ) -> ConversationDetail:
     try:
         row = get_owned_conversation(db, current_user.id, conversation_id)
-    except (ConversationNotFoundError, DocumentNotFoundError) as exc:
+    except ConversationNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
     summary = _summary(row, len(row.messages))
     return ConversationDetail(**summary.model_dump(), messages=_messages(row))
+
+
+@router.post(
+    "/{conversation_id}/documents",
+    response_model=ConversationSummary,
+    summary="Anexar um PDF já enviado a esta conversa",
+)
+def attach_conversation_document(
+    conversation_id: str,
+    payload: ConversationDocumentAttach,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ConversationSummary:
+    try:
+        row = attach_document(
+            db,
+            user_id=current_user.id,
+            conversation_id=conversation_id,
+            document_id=payload.document_id,
+        )
+    except (ConversationNotFoundError, DocumentNotFoundError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
+    return _summary(row, message_count(db, row.id))
 
 
 @router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -112,7 +146,7 @@ def remove_conversation(
 ) -> None:
     try:
         delete_conversation(db, current_user.id, conversation_id)
-    except (ConversationNotFoundError, DocumentNotFoundError) as exc:
+    except ConversationNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
 
 
@@ -124,5 +158,5 @@ def reset_messages(
 ) -> None:
     try:
         clear_messages(db, current_user.id, conversation_id)
-    except (ConversationNotFoundError, DocumentNotFoundError) as exc:
+    except ConversationNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None

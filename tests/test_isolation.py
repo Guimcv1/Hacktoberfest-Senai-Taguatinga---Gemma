@@ -21,6 +21,14 @@ def test_user_cannot_access_another_users_document(client: TestClient) -> None:
         json={"document_id": document_id, "message": "Qual e o segredo?"},
     )
     assert chat.status_code == 404
+    bob_conversation = client.post("/api/conversations", headers=bob, json={})
+    assert bob_conversation.status_code == 201
+    attach = client.post(
+        f"/api/conversations/{bob_conversation.json()['id']}/documents",
+        headers=bob,
+        json={"document_id": document_id},
+    )
+    assert attach.status_code == 404
 
 
 def test_list_only_returns_own_documents(client: TestClient) -> None:

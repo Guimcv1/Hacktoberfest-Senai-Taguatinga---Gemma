@@ -74,17 +74,74 @@ def test_delete_conversation(client: TestClient, auth_headers: dict[str, str]) -
     assert client.get(f"/api/conversations/{conversation_id}", headers=auth_headers).status_code == 404
 
 
-def test_conversations_of_expired_documents_leave_the_listing(
+def test_conversations_survive_expired_documents(
     client: TestClient, auth_headers: dict[str, str], db
 ) -> None:
     app.dependency_overrides[get_ai_client] = lambda: FakeAIClient("ok")
     document_id = _upload(client, auth_headers)
     client.post("/api/chat", headers=auth_headers, json={"document_id": document_id, "message": "Explique"})
-    assert client.get("/api/conversations", headers=auth_headers).json()["total"] == 1
+    listed = client.get("/api/conversations", headers=auth_headers).json()
+    assert listed["total"] == 1
+    conversation_id = listed["items"][0]["id"]
 
     expire_document(db, document_id)
 
-    assert client.get("/api/conversations", headers=auth_headers).json()["total"] == 0
+    after = client.get("/api/conversations", headers=auth_headers).json()
+    assert after["total"] == 1
+    assert after["items"][0]["id"] == conversation_id
+    assert after["items"][0]["document_ids"] == []
+    detail = client.get(f"/api/conversations/{conversation_id}", headers=auth_headers).json()
+    assert len(detail["messages"]) == 2
+
+
+def test_create_conversation_without_document(client: TestClient, auth_headers: dict[str, str]) -> None:
+    created = client.post("/api/conversations", headers=auth_headers, json={})
+
+    assert created.status_code == 201
+    payload = created.json()
+    assert payload["document_id"] is None
+    assert payload["document_ids"] == []
+    assert payload["message_count"] == 0
+    assert payload["title"] == "Nova conversa"
+
+
+def test_attach_uploaded_pdf_to_existing_conversation(client: TestClient, auth_headers: dict[str, str]) -> None:
+    app.dependency_overrides[get_ai_client] = lambda: FakeAIClient("ok")
+    conversation_id = client.post("/api/conversations", headers=auth_headers, json={}).json()["id"]
+    document_id = _upload(client, auth_headers)
+
+    attached = client.post(
+        f"/api/conversations/{conversation_id}/documents",
+        headers=auth_headers,
+        json={"document_id": document_id},
+    )
+    chat = client.post(
+        "/api/chat",
+        headers=auth_headers,
+        json={"conversation_id": conversation_id, "message": "Explique a mitose"},
+    )
+
+    assert attached.status_code == 200
+    assert attached.json()["document_ids"] == [document_id]
+    assert chat.status_code == 200
+    assert chat.json()["has_relevant_match"] is True
+    assert chat.json()["sources"][0]["page"] == 1
+    assert chat.json()["sources"][0]["document_id"] == document_id
+
+
+def test_upload_can_attach_to_conversation(client: TestClient, auth_headers: dict[str, str]) -> None:
+    conversation_id = client.post("/api/conversations", headers=auth_headers, json={}).json()["id"]
+    response = client.post(
+        "/api/documents",
+        headers=auth_headers,
+        files={"file": ("aula.pdf", build_pdf(["A mitose divide celulas"]), "application/pdf")},
+        data={"conversation_id": conversation_id},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["conversation_id"] == conversation_id
+    detail = client.get(f"/api/conversations/{conversation_id}", headers=auth_headers).json()
+    assert detail["document_ids"] == [response.json()["document_id"]]
 
 
 def test_delete_document(client: TestClient, auth_headers: dict[str, str]) -> None:

@@ -2,11 +2,29 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Column, ForeignKey, Integer, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.db.types import UTCDateTime
+
+conversation_documents = Table(
+    "conversation_documents",
+    Base.metadata,
+    Column(
+        "conversation_id",
+        String(36),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "document_id",
+        String(36),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    ),
+)
 
 
 class User(Base):
@@ -37,7 +55,10 @@ class Document(Base):
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)
 
     owner: Mapped[User] = relationship(back_populates="documents")
-    conversations: Mapped[list[Conversation]] = relationship(back_populates="document", cascade="all, delete-orphan")
+    conversations: Mapped[list[Conversation]] = relationship(
+        secondary=conversation_documents,
+        back_populates="documents",
+    )
 
 
 class Conversation(Base):
@@ -45,13 +66,21 @@ class Conversation(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), index=True)
+    document_id: Mapped[str | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(200), default="Nova conversa")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime())
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime())
 
     owner: Mapped[User] = relationship(back_populates="conversations")
-    document: Mapped[Document] = relationship(back_populates="conversations")
+    document: Mapped[Document | None] = relationship(foreign_keys=[document_id])
+    documents: Mapped[list[Document]] = relationship(
+        secondary=conversation_documents,
+        back_populates="conversations",
+    )
     messages: Mapped[list[Message]] = relationship(
         back_populates="conversation",
         cascade="all, delete-orphan",

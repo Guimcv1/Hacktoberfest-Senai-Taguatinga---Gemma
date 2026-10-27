@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import BinaryIO
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -31,6 +31,7 @@ from app.services.document_repo import (
     pages_from_json,
     save_document,
 )
+from app.services.conversations import ConversationNotFoundError, attach_document
 from app.services.documents import (
     DocumentProcessingError,
     PdfTooLargeError,
@@ -71,6 +72,7 @@ def _meta(row) -> DocumentMeta:
 )
 def upload_document(
     file: UploadFile = File(..., description="Arquivo PDF enviado no campo file."),
+    conversation_id: str | None = Form(default=None, description="Conversa existente para anexar este PDF."),
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -102,6 +104,19 @@ def upload_document(
     except DocumentStoreFullError as exc:
         raise HTTPException(status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=exc.message) from None
 
+    attached_conversation_id = None
+    if conversation_id:
+        try:
+            attach_document(
+                db,
+                user_id=current_user.id,
+                conversation_id=conversation_id,
+                document_id=stored.id,
+            )
+        except (ConversationNotFoundError, DocumentNotFoundError) as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
+        attached_conversation_id = conversation_id
+
     logger.info("PDF processado: document_id=%s page_count=%s", stored.id, stored.page_count)
     return DocumentUploadResponse(
         document_id=stored.id,
@@ -109,6 +124,7 @@ def upload_document(
         page_count=stored.page_count,
         pages=pages_from_json(stored.pages_json) if deduplicated else extracted.pages,
         deduplicated=deduplicated,
+        conversation_id=attached_conversation_id,
     )
 
 

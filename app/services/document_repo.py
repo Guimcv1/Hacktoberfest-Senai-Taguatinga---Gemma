@@ -5,13 +5,13 @@ import json
 from datetime import timedelta
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.deps import utcnow
-from app.db.models import Document
+from app.db.models import Conversation, Document, conversation_documents
 from app.schemas.documents import ExtractedDocument, ExtractedPage
 
 
@@ -58,15 +58,22 @@ def extracted_from_row(row: Document) -> ExtractedDocument:
 
 
 def purge_expired(db: Session, user_id: str | None = None) -> int:
-    """Remove documentos vencidos (e, em cascata, suas conversas). Sem user_id, de todos."""
+    """Remove documentos vencidos. Conversas permanecem; só a associação com o PDF é apagada."""
     query = select(Document).where(Document.expires_at <= utcnow())
     if user_id is not None:
         query = query.where(Document.user_id == user_id)
     rows = db.scalars(query).all()
     for row in rows:
+        unlink_document_from_conversations(db, row.id)
         db.delete(row)
     db.commit()
     return len(rows)
+
+
+def unlink_document_from_conversations(db: Session, document_id: str) -> None:
+    """Solta o PDF das conversas antes de apagá-lo, para o histórico sobreviver."""
+    db.execute(conversation_documents.delete().where(conversation_documents.c.document_id == document_id))
+    db.execute(update(Conversation).where(Conversation.document_id == document_id).values(document_id=None))
 
 
 def _find_by_hash(db: Session, user_id: str, file_hash: str) -> Document | None:
@@ -147,6 +154,7 @@ def list_documents(db: Session, user_id: str, *, limit: int, offset: int) -> tup
 
 def delete_document(db: Session, user_id: str, document_id: str) -> None:
     row = get_owned_document(db, user_id, document_id)
+    unlink_document_from_conversations(db, row.id)
     db.delete(row)
     db.commit()
 

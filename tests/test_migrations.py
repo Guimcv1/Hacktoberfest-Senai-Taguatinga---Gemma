@@ -23,7 +23,14 @@ from app.db.migrations import (
 from app.db.models import User
 from app.db.session import create_db_engine, init_db
 
-APP_TABLES = {"users", "documents", "conversations", "messages", "revoked_tokens"}
+APP_TABLES = {
+    "users",
+    "documents",
+    "conversations",
+    "conversation_documents",
+    "messages",
+    "revoked_tokens",
+}
 
 
 def _sqlite_url(path: Path) -> str:

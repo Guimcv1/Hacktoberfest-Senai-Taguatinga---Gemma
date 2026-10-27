@@ -73,7 +73,7 @@ def test_other_user_cannot_get_document(db: Session) -> None:
         get_owned_document(db, "bia", stored.id)
 
 
-def test_expired_document_is_purged_with_its_conversations(db: Session) -> None:
+def test_expired_document_is_purged_but_conversations_remain(db: Session) -> None:
     _add_user(db, "ana")
     stored, _ = _save(db, "ana", "Texto")
     now = datetime.now(timezone.utc)
@@ -85,7 +85,9 @@ def test_expired_document_is_purged_with_its_conversations(db: Session) -> None:
     with pytest.raises(DocumentNotFoundError):
         get_owned_document(db, "ana", stored.id)
     assert _count(db, Document) == 0
-    assert _count(db, Conversation) == 0
+    leftover = db.get(Conversation, "conversa")
+    assert leftover is not None
+    assert leftover.document_id is None
 
 
 def test_global_purge_covers_every_user(db: Session) -> None:

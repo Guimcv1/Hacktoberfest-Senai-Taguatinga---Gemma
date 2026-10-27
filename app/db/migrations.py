@@ -58,11 +58,13 @@ def upgrade_database(engine: Engine) -> None:
         if "alembic_version" not in tables:
             existing = _BASELINE_TABLES & tables
             if existing == _BASELINE_TABLES:
+                # create_all de versões novas já inclui tabelas posteriores à 001.
+                revision = head_revision() if "conversation_documents" in tables else BASELINE_REVISION
                 logger.warning(
-                    "Banco sem histórico de migrações; registrando a revisão inicial %s.",
-                    BASELINE_REVISION,
+                    "Banco sem histórico de migrações; registrando a revisão %s.",
+                    revision,
                 )
-                command.stamp(config, BASELINE_REVISION)
+                command.stamp(config, revision)
             elif existing:
                 raise MigrationStateError(
                     "O banco tem apenas parte das tabelas do StudyBuddy e nenhum histórico de "

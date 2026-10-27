@@ -3,6 +3,7 @@ from app.services.retrieval import (
     best_excerpt,
     format_context,
     query_terms,
+    retrieve_from_documents,
     retrieve_pages,
     retrieve_relevant_excerpts,
 )
@@ -128,3 +129,26 @@ def test_best_excerpt_is_centered_on_the_terms_and_bounded() -> None:
 
     assert "ribossomo" in excerpt
     assert len(excerpt) <= 120
+
+
+def test_retrieval_searches_only_the_provided_documents() -> None:
+    attached = _document("A mitose divide celulas.")
+    other = _document("A fotossintese ocorre nos cloroplastos.")
+
+    pages, has_match = retrieve_from_documents(
+        [("doc-mitose", "aula.pdf", attached), ("doc-foto", "outro.pdf", other)],
+        "Onde ocorre a fotossintese?",
+        max_excerpts=1,
+    )
+
+    assert has_match is True
+    assert pages[0].document_id == "doc-foto"
+    assert pages[0].page_number == 1
+
+    only_attached, no_match = retrieve_from_documents(
+        [("doc-mitose", "aula.pdf", attached)],
+        "Onde ocorre a fotossintese?",
+        max_excerpts=1,
+    )
+    assert no_match is False
+    assert only_attached[0].document_id == "doc-mitose"

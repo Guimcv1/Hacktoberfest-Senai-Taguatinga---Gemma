@@ -12,9 +12,17 @@ class FakeAIClient:
         self,
         *,
         question: str,
-        context: str,
+        context: str = "",
+        history: list | None = None,
         has_relevant_match: bool = True,
+        has_material: bool = False,
     ) -> AIExplanation:
         self.calls += 1
-        self.last_call = {"question": question, "context": context, "has_relevant_match": has_relevant_match}
+        self.last_call = {
+            "question": question,
+            "context": context,
+            "history": list(history or []),
+            "has_relevant_match": has_relevant_match,
+            "has_material": has_material,
+        }
         return AIExplanation(content=self.content, model=self.model)

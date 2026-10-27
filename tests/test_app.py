@@ -14,6 +14,7 @@ def test_app_initializes() -> None:
     assert "/api/auth/login" in schema["paths"]
     assert "/ready" in schema["paths"]
     assert "/api/conversations" in schema["paths"]
+    assert "/api/conversations/{conversation_id}/documents" in schema["paths"]
     paths = {getattr(route, "path", None) for route in app.routes}
     assert "/docs" in paths
     assert "/openapi.json" in paths

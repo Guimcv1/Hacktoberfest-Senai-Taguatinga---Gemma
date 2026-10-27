@@ -6,6 +6,8 @@ import re
 import unicodedata
 from collections import Counter
 
+from dataclasses import dataclass
+
 from app.schemas.documents import ExtractedDocument, ExtractedPage
 
 # Palavras funcionais, verbos de comando e referências ao próprio material ("explique este
@@ -70,6 +72,14 @@ def query_terms(query: str) -> set[str]:
     return terms
 
 
+@dataclass(frozen=True)
+class RetrievedExcerpt:
+    page_number: int
+    text: str
+    document_id: str = ""
+    filename: str = ""
+
+
 def retrieve_pages(
     document: ExtractedDocument,
     query: str,
@@ -78,30 +88,54 @@ def retrieve_pages(
     max_chars: int = 6000,
 ) -> tuple[list[ExtractedPage], bool]:
     """Seleciona páginas relevantes dentro de max_chars. O segundo valor indica correspondência lexical."""
+    excerpts, has_match = retrieve_from_documents(
+        [("", "", document)],
+        query,
+        max_excerpts=max_excerpts,
+        max_chars=max_chars,
+    )
+    return [ExtractedPage(page_number=item.page_number, text=item.text) for item in excerpts], has_match
+
+
+def retrieve_from_documents(
+    documents: list[tuple[str, str, ExtractedDocument]],
+    query: str,
+    *,
+    max_excerpts: int = 3,
+    max_chars: int = 6000,
+) -> tuple[list[RetrievedExcerpt], bool]:
+    """Recupera trechos só dos documentos informados (os associados à conversa)."""
     terms = query_terms(query)
-    candidates: list[tuple[ExtractedPage, Counter[str]]] = []
+    candidates: list[tuple[RetrievedExcerpt, Counter[str]]] = []
     seen_text: set[str] = set()
-    for page in document.pages:
-        normalized = " ".join(page.text.split())
-        if not normalized or normalized in seen_text:
-            continue
-        seen_text.add(normalized)
-        candidates.append((page, Counter(stem(token) for token in tokenize(page.text))))
+    for document_id, filename, document in documents:
+        for page in document.pages:
+            normalized = " ".join(page.text.split())
+            if not normalized or normalized in seen_text:
+                continue
+            seen_text.add(normalized)
+            excerpt = RetrievedExcerpt(
+                page_number=page.page_number,
+                text=page.text,
+                document_id=document_id,
+                filename=filename,
+            )
+            candidates.append((excerpt, Counter(stem(token) for token in tokenize(page.text))))
 
     if not candidates:
         return [], False
 
-    matched: list[tuple[int, int, ExtractedPage]] = []
-    for page, counts in candidates:
+    matched: list[tuple[int, int, RetrievedExcerpt]] = []
+    for excerpt, counts in candidates:
         distinct = sum(1 for term in terms if counts[term])
         if distinct:
-            matched.append((distinct, sum(counts[term] for term in terms), page))
+            matched.append((distinct, sum(counts[term] for term in terms), excerpt))
 
     if matched:
-        matched.sort(key=lambda item: (-item[0], -item[1], item[2].page_number))
-        selected = [page for _, _, page in matched[:max_excerpts]]
+        matched.sort(key=lambda item: (-item[0], -item[1], item[2].page_number, item[2].filename))
+        selected = [excerpt for _, _, excerpt in matched[:max_excerpts]]
     else:
-        selected = [page for page, _ in candidates[:max_excerpts]]
+        selected = [excerpt for excerpt, _ in candidates[:max_excerpts]]
 
     return _fit_to_budget(selected, terms, max_chars), bool(matched)
 
@@ -123,13 +157,21 @@ def retrieve_relevant_excerpts(
     return pages
 
 
-def format_context(pages: list[ExtractedPage]) -> str:
+def format_context(pages: list[ExtractedPage] | list[RetrievedExcerpt]) -> str:
+    document_ids = {getattr(page, "document_id", "") or "" for page in pages}
+    use_filename = len([item for item in document_ids if item]) > 1
     blocks: list[str] = []
     for page in pages:
         text = page.text.strip()
         if not text:
             continue
-        blocks.append(f"[Página {page.page_number}]\n{text}")
+        filename = getattr(page, "filename", "") or ""
+        label = (
+            f"[Página {page.page_number} — {filename}]"
+            if use_filename and filename
+            else f"[Página {page.page_number}]"
+        )
+        blocks.append(f"{label}\n{text}")
     return "\n\n".join(blocks)
 
 
@@ -182,8 +224,8 @@ def _truncate_for_context(text: str, terms: set[str], max_chars: int) -> str:
     return excerpt
 
 
-def _fit_to_budget(pages: list[ExtractedPage], terms: set[str], max_chars: int) -> list[ExtractedPage]:
-    fitted: list[ExtractedPage] = []
+def _fit_to_budget(pages: list[RetrievedExcerpt], terms: set[str], max_chars: int) -> list[RetrievedExcerpt]:
+    fitted: list[RetrievedExcerpt] = []
     remaining = max_chars
     for page in pages:
         text = page.text.strip()
@@ -191,7 +233,14 @@ def _fit_to_budget(pages: list[ExtractedPage], terms: set[str], max_chars: int) 
             if fitted and remaining < _MIN_TRUNCATED_CHARS:
                 break
             text = _truncate_for_context(text, terms, remaining)
-        fitted.append(ExtractedPage(page_number=page.page_number, text=text))
+        fitted.append(
+            RetrievedExcerpt(
+                page_number=page.page_number,
+                text=text,
+                document_id=page.document_id,
+                filename=page.filename,
+            )
+        )
         remaining -= len(text)
         if remaining <= 0:
             break

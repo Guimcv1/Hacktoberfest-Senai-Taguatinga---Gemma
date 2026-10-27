@@ -70,6 +70,7 @@ def test_chat_with_valid_document_returns_mocked_answer(client: TestClient, auth
     assert fake.last_call is not None
     assert "Explique a mitose deste capitulo" in fake.last_call["question"]
     assert "[Página 2]" in fake.last_call["context"]
+    assert fake.last_call["has_material"] is True
 
 
 def test_chat_sources_use_retrieved_page_numbers_not_model_text(
@@ -238,10 +239,10 @@ def test_follow_up_reuses_conversation_and_keeps_order(client: TestClient, auth_
     assert client.get("/api/conversations", headers=auth_headers).json()["total"] == 1
 
 
-def test_conversation_from_another_document_is_rejected(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_chat_can_attach_a_second_owned_document(client: TestClient, auth_headers: dict[str, str]) -> None:
     _enable_fake_ai()
     first_doc = _upload(client, ["Documento A"], auth_headers)
-    second_doc = _upload(client, ["Documento B"], auth_headers)
+    second_doc = _upload(client, ["Documento B sobre mitose"], auth_headers)
     conversation_id = client.post(
         CHAT_URL,
         headers=auth_headers,
@@ -251,11 +252,11 @@ def test_conversation_from_another_document_is_rejected(client: TestClient, auth
     response = client.post(
         CHAT_URL,
         headers=auth_headers,
-        json={"document_id": second_doc["document_id"], "conversation_id": conversation_id, "message": "Explique"},
+        json={"document_id": second_doc["document_id"], "conversation_id": conversation_id, "message": "Explique a mitose"},
     )
 
-    assert response.status_code == 422
-    assert response.json()["detail"] == "A conversa não pertence a este documento."
+    assert response.status_code == 200
+    assert set(response.json()["document_ids"]) == {first_doc["document_id"], second_doc["document_id"]}
 
 
 def test_unknown_conversation_returns_404(client: TestClient, auth_headers: dict[str, str]) -> None:
@@ -302,4 +303,93 @@ def test_no_match_is_reported_to_the_model_and_the_client(client: TestClient, au
 
     assert payload["has_relevant_match"] is False
     assert fake.last_call["has_relevant_match"] is False
-    assert [source["page"] for source in payload["sources"]] == [1]
+    assert fake.last_call["has_material"] is True
+    assert payload["sources"] == []
+    assert "Historia do Brasil colonial" in fake.last_call["context"]
+
+
+def test_chat_without_pdf_creates_conversation_and_answers(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    fake = _enable_fake_ai("Mitose e divisao celular.")
+
+    response = client.post(CHAT_URL, headers=auth_headers, json={"message": "O que e mitose?"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["document_id"] is None
+    assert payload["document_ids"] == []
+    assert payload["used_documents"] is False
+    assert payload["has_relevant_match"] is False
+    assert payload["sources"] == []
+    assert payload["answer"] == "Mitose e divisao celular."
+    assert fake.last_call["has_material"] is False
+    assert fake.last_call["context"] == ""
+    assert fake.last_call["history"] == []
+
+
+def test_chat_without_pdf_persists_and_sends_history(client: TestClient, auth_headers: dict[str, str]) -> None:
+    fake = _enable_fake_ai("Ok")
+    first = client.post(CHAT_URL, headers=auth_headers, json={"message": "O que e mitose?"}).json()
+
+    second = client.post(
+        CHAT_URL,
+        headers=auth_headers,
+        json={"conversation_id": first["conversation_id"], "message": "E a meiose?"},
+    )
+
+    assert second.status_code == 200
+    detail = client.get(f"/api/conversations/{first['conversation_id']}", headers=auth_headers).json()
+    assert [message["role"] for message in detail["messages"]] == ["user", "assistant", "user", "assistant"]
+    assert detail["document_ids"] == []
+    assert fake.last_call["history"][0] == {"role": "user", "content": "O que e mitose?"}
+    assert fake.last_call["history"][1]["role"] == "assistant"
+
+
+def test_retrieval_ignores_documents_not_attached_to_the_conversation(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    fake = _enable_fake_ai()
+    other = _upload(client, ["A fotossintese ocorre nos cloroplastos."], auth_headers)
+    attached = _upload(client, ["A mitose divide celulas."], auth_headers)
+    conversation = client.post(
+        "/api/conversations",
+        headers=auth_headers,
+        json={"document_id": attached["document_id"]},
+    ).json()
+
+    payload = client.post(
+        CHAT_URL,
+        headers=auth_headers,
+        json={"conversation_id": conversation["id"], "message": "Onde ocorre a fotossintese?"},
+    ).json()
+
+    assert other["document_id"] not in payload["document_ids"]
+    assert payload["has_relevant_match"] is False
+    assert "fotossintese" not in fake.last_call["context"].lower()
+    assert "mitose" in fake.last_call["context"].lower()
+
+
+def test_cannot_attach_another_users_document(client: TestClient) -> None:
+    from tests.helpers import register_and_login
+
+    _enable_fake_ai()
+    alice = register_and_login(client, "alice-chat@example.com")
+    bob = register_and_login(client, "bob-chat@example.com")
+    alice_doc = _upload(client, ["Segredo da Alice sobre mitose"], alice)
+    bob_conversation = client.post("/api/conversations", headers=bob, json={}).json()
+
+    attached = client.post(
+        f"/api/conversations/{bob_conversation['id']}/documents",
+        headers=bob,
+        json={"document_id": alice_doc["document_id"]},
+    )
+    chat = client.post(
+        CHAT_URL,
+        headers=bob,
+        json={"conversation_id": bob_conversation["id"], "document_id": alice_doc["document_id"], "message": "Explique"},
+    )
+
+    assert attached.status_code == 404
+    assert chat.status_code == 404
+    assert client.get("/api/conversations", headers=bob).json()["items"][0]["document_ids"] == []
