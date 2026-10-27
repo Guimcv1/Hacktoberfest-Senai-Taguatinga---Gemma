@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -17,12 +18,22 @@ from app.services.document_repo import (
 )
 
 
+MODEL_NAME_MAX_CHARS = 80
+
+
 class ConversationNotFoundError(DocumentAccessError):
     def __init__(self) -> None:
         super().__init__("conversation_not_found", "Conversa não encontrada.")
 
 
-def create_conversation(db: Session, *, user_id: str, document_id: str, title: str | None = None) -> Conversation:
+def create_conversation(
+    db: Session,
+    *,
+    user_id: str,
+    document_id: str,
+    title: str | None = None,
+    commit: bool = True,
+) -> Conversation:
     document = get_owned_document(db, user_id, document_id)
     now = utcnow()
     conversation = Conversation(
@@ -34,8 +45,11 @@ def create_conversation(db: Session, *, user_id: str, document_id: str, title: s
         updated_at=now,
     )
     db.add(conversation)
-    db.commit()
-    db.refresh(conversation)
+    if commit:
+        db.commit()
+        db.refresh(conversation)
+    else:
+        db.flush()
     return conversation
 
 
@@ -87,14 +101,17 @@ def add_turn(
     sources: list[ChatSource],
     model: str,
 ) -> None:
-    now = utcnow()
+    asked_at = utcnow()
+    # A ordem do histórico vem de created_at: a resposta fica sempre depois da pergunta,
+    # mesmo quando o relógio do sistema devolve o mesmo instante para as duas.
+    answered_at = max(utcnow(), asked_at + timedelta(microseconds=1))
     db.add(
         Message(
             id=str(uuid4()),
             conversation_id=conversation.id,
             role="user",
             content=question,
-            created_at=now,
+            created_at=asked_at,
         )
     )
     db.add(
@@ -104,11 +121,11 @@ def add_turn(
             role="assistant",
             content=answer,
             sources_json=json.dumps([source.model_dump() for source in sources], ensure_ascii=False),
-            model=model,
-            created_at=utcnow(),
+            model=model[:MODEL_NAME_MAX_CHARS],
+            created_at=answered_at,
         )
     )
-    conversation.updated_at = utcnow()
+    conversation.updated_at = answered_at
     db.commit()
 
 

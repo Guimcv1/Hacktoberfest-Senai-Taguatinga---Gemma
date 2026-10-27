@@ -20,7 +20,7 @@ from app.services.conversations import (
     get_owned_conversation,
 )
 from app.services.document_repo import DocumentNotFoundError, extracted_from_row, get_owned_document
-from app.services.retrieval import format_context, retrieve_pages
+from app.services.retrieval import best_excerpt, format_context, query_terms, retrieve_pages
 
 logger = logging.getLogger("studybuddy")
 
@@ -53,38 +53,41 @@ async def chat(
             detail="A mensagem excede o tamanho máximo permitido.",
         )
 
+    user_id = current_user.id
     try:
-        document = get_owned_document(db, current_user.id, payload.document_id)
+        document = get_owned_document(db, user_id, payload.document_id)
         if payload.conversation_id:
-            conversation = get_owned_conversation(db, current_user.id, payload.conversation_id)
+            conversation = get_owned_conversation(db, user_id, payload.conversation_id)
             if conversation.document_id != document.id:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="A conversa não pertence a este documento.",
                 )
-        else:
-            conversation = create_conversation(
-                db,
-                user_id=current_user.id,
-                document_id=document.id,
-                title=message[:80],
-            )
-    except DocumentNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
-    except ConversationNotFoundError as exc:
+    except (DocumentNotFoundError, ConversationNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
 
+    document_id = document.id
     pages, has_match = retrieve_pages(
         extracted_from_row(document),
         message,
         max_excerpts=settings.max_retrieval_pages,
         max_chars=settings.max_context_chars,
     )
+    terms = query_terms(message)
     context = format_context(pages)
-    sources = [ChatSource(page=page.page_number, excerpt=_excerpt(page.text)) for page in pages]
+    sources = [
+        ChatSource(page=page.page_number, excerpt=best_excerpt(" ".join(page.text.split()), terms, _MAX_EXCERPT_CHARS))
+        for page in pages
+    ]
+    # Encerra a transação de leitura: a conexão não fica presa ao pool durante a chamada à IA.
+    db.commit()
 
     try:
-        explanation = await ai_client.generate_explanation(question=message, context=context)
+        explanation = await ai_client.generate_explanation(
+            question=message,
+            context=context,
+            has_relevant_match=has_match,
+        )
     except AIClientError as exc:
         logger.warning("Falha ao consultar a IA: tipo=%s", type(exc).__name__)
         status_code = (
@@ -94,6 +97,21 @@ async def chat(
         )
         raise HTTPException(status_code=status_code, detail=exc.public_message) from None
 
+    # A conversa só é criada depois de uma resposta válida, para falhas da IA não deixarem conversas vazias.
+    try:
+        if payload.conversation_id:
+            conversation = get_owned_conversation(db, user_id, payload.conversation_id)
+        else:
+            conversation = create_conversation(
+                db,
+                user_id=user_id,
+                document_id=document_id,
+                title=message[:80],
+                commit=False,
+            )
+    except (DocumentNotFoundError, ConversationNotFoundError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
+
     add_turn(
         db,
         conversation,
@@ -102,9 +120,9 @@ async def chat(
         sources=sources,
         model=explanation.model,
     )
-    logger.info("Chat respondido: document_id=%s pages=%s", document.id, [page.page_number for page in pages])
+    logger.info("Chat respondido: document_id=%s pages=%s", document_id, [page.page_number for page in pages])
     return ChatResponse(
-        document_id=document.id,
+        document_id=document_id,
         conversation_id=conversation.id,
         answer=explanation.content,
         sources=sources,
@@ -112,10 +130,3 @@ async def chat(
         status="completed",
         has_relevant_match=has_match,
     )
-
-
-def _excerpt(text: str) -> str:
-    cleaned = " ".join(text.split())
-    if len(cleaned) <= _MAX_EXCERPT_CHARS:
-        return cleaned
-    return cleaned[:_MAX_EXCERPT_CHARS].rstrip()
