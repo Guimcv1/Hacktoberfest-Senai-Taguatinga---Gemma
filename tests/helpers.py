@@ -1,4 +1,4 @@
-import fitz
+import pymupdf
 from fastapi.testclient import TestClient
 
 
@@ -12,17 +12,27 @@ def override_settings(**updates):
     return current
 
 
-def build_pdf(pages: list[str]) -> bytes:
+def build_pdf(pages: list[str], **save_options) -> bytes:
     """Cria um PDF em memória, uma página por item da lista."""
-    document = fitz.open()
+    document = pymupdf.open()
     try:
         for text in pages:
             page = document.new_page()
             if text:
                 page.insert_text((72, 72), text)
-        return document.tobytes()
+        return document.tobytes(**save_options)
     finally:
         document.close()
+
+
+def build_encrypted_pdf(pages: list[str], *, user_password: str) -> bytes:
+    return build_pdf(
+        pages,
+        encryption=pymupdf.PDF_ENCRYPT_AES_256,
+        owner_pw="senha-do-dono",
+        user_pw=user_password,
+        permissions=pymupdf.PDF_PERM_PRINT,
+    )
 
 
 def register_and_login(

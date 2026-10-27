@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-import fitz
+import unicodedata
+
+import pymupdf
 
 from app.schemas.documents import ExtractedDocument, ExtractedPage
+
+DEFAULT_FILENAME = "document.pdf"
+MAX_FILENAME_CHARS = 255
 
 
 class DocumentProcessingError(Exception):
@@ -36,6 +41,20 @@ class PdfTooManyPagesError(DocumentProcessingError):
         super().__init__("pdf_too_many_pages", "O PDF excede o limite de páginas.")
 
 
+def sanitize_filename(raw: str | None) -> str:
+    """Mantém só o nome exibível: sem caminho, caracteres de controle ou de direção (bidi)."""
+    name = (raw or "").replace("\\", "/").rsplit("/", 1)[-1]
+    name = "".join(char for char in name if unicodedata.category(char) not in {"Cc", "Cf"}).strip()
+    if not name or name in {".", ".."}:
+        return DEFAULT_FILENAME
+    if len(name) <= MAX_FILENAME_CHARS:
+        return name
+    stem, dot, extension = name.rpartition(".")
+    if dot and stem and len(extension) <= 16:
+        return f"{stem[: MAX_FILENAME_CHARS - len(extension) - 1]}.{extension}"
+    return name[:MAX_FILENAME_CHARS]
+
+
 def extract_pdf(
     content: bytes,
     *,
@@ -56,7 +75,7 @@ def extract_pdf(
         raise InvalidPdfError()
 
     try:
-        document = fitz.open(stream=content, filetype="pdf")
+        document = pymupdf.open(stream=content, filetype="pdf")
     except Exception:
         raise InvalidPdfError() from None
 
@@ -70,7 +89,7 @@ def extract_pdf(
         document.close()
 
 
-def _extract_pages(document: fitz.Document, *, max_pages: int | None = None) -> ExtractedDocument:
+def _extract_pages(document: pymupdf.Document, *, max_pages: int | None = None) -> ExtractedDocument:
     if document.is_encrypted or document.needs_pass:
         raise InvalidPdfError("PDF protegido por senha não é suportado.")
 

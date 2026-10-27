@@ -9,7 +9,12 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.deps import utcnow
 from app.db.models import Conversation, Message
 from app.schemas.chat import ChatSource
-from app.services.document_repo import DocumentAccessError, DocumentNotFoundError, get_owned_document
+from app.services.document_repo import (
+    DocumentAccessError,
+    DocumentNotFoundError,
+    get_owned_document,
+    purge_expired,
+)
 
 
 class ConversationNotFoundError(DocumentAccessError):
@@ -47,6 +52,7 @@ def get_owned_conversation(db: Session, user_id: str, conversation_id: str) -> C
 
 
 def list_conversations(db: Session, user_id: str, *, limit: int, offset: int) -> tuple[list[Conversation], int]:
+    purge_expired(db, user_id)
     total = db.scalar(select(func.count()).select_from(Conversation).where(Conversation.user_id == user_id)) or 0
     rows = db.scalars(
         select(Conversation)

@@ -47,9 +47,9 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000"
     max_pdf_size_mb: int = Field(default=10, ge=1)
     max_pdf_pages: int = Field(default=50, ge=1)
-    document_ttl_minutes: int = Field(default=30, ge=1)
+    document_ttl_minutes: int = Field(default=10_080, ge=1)
     max_stored_documents: int = Field(default=50, ge=1)
-    max_stored_text_chars: int = Field(default=400_000, ge=1000)
+    max_stored_text_chars: int = Field(default=2_000_000, ge=1000)
     max_chat_message_chars: int = Field(default=2000, ge=50)
     max_retrieval_pages: int = Field(default=3, ge=1)
     max_context_chars: int = Field(default=6000, ge=200)

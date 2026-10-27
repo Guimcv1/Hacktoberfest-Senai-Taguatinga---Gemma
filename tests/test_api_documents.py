@@ -4,7 +4,8 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from tests.helpers import build_pdf, override_settings
+from app.api.routes.documents import upload_document
+from tests.helpers import build_encrypted_pdf, build_pdf, override_settings
 
 UPLOAD_URL = "/api/documents"
 
@@ -126,6 +127,52 @@ def test_upload_accepts_valid_pdf_with_unrelated_mime_type(
 
     assert response.status_code == 201
     assert response.json()["filename"] == "notas.bin"
+
+
+def test_upload_sanitizes_filename(client: TestClient, auth_headers: dict[str, str]) -> None:
+    response = _post_file(client, build_pdf(["Texto"]), auth_headers, filename="C:\\fakepath\\aula\u202e.pdf")
+
+    assert response.status_code == 201
+    assert response.json()["filename"] == "aula.pdf"
+
+
+def test_upload_rejects_too_many_pages(client: TestClient, auth_headers: dict[str, str]) -> None:
+    override_settings(max_pdf_pages=2)
+
+    response = _post_file(client, build_pdf(["1", "2", "3"]), auth_headers)
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "O PDF excede o limite de páginas."
+
+
+def test_upload_rejects_pdf_with_opening_password(client: TestClient, auth_headers: dict[str, str]) -> None:
+    response = _post_file(client, build_encrypted_pdf(["Texto"], user_password="leitor"), auth_headers)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "PDF protegido por senha não é suportado."
+
+
+def test_upload_quota_returns_507_with_actionable_message(client: TestClient, auth_headers: dict[str, str]) -> None:
+    override_settings(max_stored_documents=1)
+    assert _post_file(client, build_pdf(["Primeiro"]), auth_headers).status_code == 201
+
+    response = _post_file(client, build_pdf(["Segundo"]), auth_headers)
+
+    assert response.status_code == 507
+    assert "Exclua documentos antigos" in response.json()["detail"]
+
+
+def test_upload_text_above_user_quota_returns_413(client: TestClient, auth_headers: dict[str, str]) -> None:
+    override_settings(max_stored_text_chars=1000)
+
+    response = _post_file(client, build_pdf(["Texto de estudo " * 5] * 15), auth_headers)
+
+    assert response.status_code == 413
+    assert "texto extraído" in response.json()["detail"]
+
+
+def test_upload_endpoint_runs_in_threadpool() -> None:
+    assert not inspect.iscoroutinefunction(upload_document)
 
 
 def test_upload_requires_authentication(client: TestClient) -> None:

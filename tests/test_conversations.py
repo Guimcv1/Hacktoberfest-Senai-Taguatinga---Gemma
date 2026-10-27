@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services.ai_client import get_ai_client
+from app.services.document_repo import expire_document
 from tests.fakes import FakeAIClient
 from tests.helpers import build_pdf
 
@@ -47,6 +48,19 @@ def test_delete_conversation(client: TestClient, auth_headers: dict[str, str]) -
     deleted = client.delete(f"/api/conversations/{conversation_id}", headers=auth_headers)
     assert deleted.status_code == 204
     assert client.get(f"/api/conversations/{conversation_id}", headers=auth_headers).status_code == 404
+
+
+def test_conversations_of_expired_documents_leave_the_listing(
+    client: TestClient, auth_headers: dict[str, str], db
+) -> None:
+    app.dependency_overrides[get_ai_client] = lambda: FakeAIClient("ok")
+    document_id = _upload(client, auth_headers)
+    client.post("/api/chat", headers=auth_headers, json={"document_id": document_id, "message": "Explique"})
+    assert client.get("/api/conversations", headers=auth_headers).json()["total"] == 1
+
+    expire_document(db, document_id)
+
+    assert client.get("/api/conversations", headers=auth_headers).json()["total"] == 0
 
 
 def test_delete_document(client: TestClient, auth_headers: dict[str, str]) -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from typing import BinaryIO
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
@@ -22,6 +22,7 @@ from app.services.document_repo import (
     DocumentAccessError,
     DocumentNotFoundError,
     DocumentStoreFullError,
+    DocumentTooLargeError,
     content_hash,
     delete_document,
     extracted_from_row,
@@ -34,6 +35,7 @@ from app.services.documents import (
     DocumentProcessingError,
     PdfTooLargeError,
     extract_pdf,
+    sanitize_filename,
 )
 
 logger = logging.getLogger("studybuddy")
@@ -67,19 +69,20 @@ def _meta(row) -> DocumentMeta:
     status_code=status.HTTP_201_CREATED,
     summary="Enviar PDF",
 )
-async def upload_document(
+def upload_document(
     file: UploadFile = File(..., description="Arquivo PDF enviado no campo file."),
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> DocumentUploadResponse:
-    filename = Path(file.filename or "document.pdf").name
+    # Rota síncrona: a extração com PyMuPDF roda no threadpool e não trava o event loop.
+    filename = sanitize_filename(file.filename)
     try:
-        content = await _read_upload_limited(file, settings.max_pdf_size_bytes)
+        content = _read_upload_limited(file.file, settings.max_pdf_size_bytes)
         extracted = extract_pdf(
             content,
             max_size_bytes=settings.max_pdf_size_bytes,
-            max_pages=getattr(settings, "max_pdf_pages", None),
+            max_pages=settings.max_pdf_pages,
         )
         stored, deduplicated = save_document(
             db,
@@ -94,10 +97,10 @@ async def upload_document(
             status_code=_HTTP_STATUS_BY_CODE.get(exc.code, status.HTTP_400_BAD_REQUEST),
             detail=exc.message,
         ) from None
+    except DocumentTooLargeError as exc:
+        raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=exc.message) from None
     except DocumentStoreFullError as exc:
         raise HTTPException(status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=exc.message) from None
-    finally:
-        await file.close()
 
     logger.info("PDF processado: document_id=%s page_count=%s", stored.id, stored.page_count)
     return DocumentUploadResponse(
@@ -146,11 +149,11 @@ def remove_document(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message) from None
 
 
-async def _read_upload_limited(upload: UploadFile, max_size_bytes: int) -> bytes:
+def _read_upload_limited(stream: BinaryIO, max_size_bytes: int) -> bytes:
     chunks: list[bytes] = []
     total = 0
     while True:
-        chunk = await upload.read(_READ_CHUNK_SIZE)
+        chunk = stream.read(_READ_CHUNK_SIZE)
         if not chunk:
             break
         total += len(chunk)

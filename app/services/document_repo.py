@@ -6,6 +6,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -30,7 +31,15 @@ class DocumentStoreFullError(DocumentAccessError):
     def __init__(self) -> None:
         super().__init__(
             "document_store_full",
-            "Limite temporário de documentos atingido. Tente novamente mais tarde.",
+            "Limite de armazenamento de documentos atingido. Exclua documentos antigos e tente novamente.",
+        )
+
+
+class DocumentTooLargeError(DocumentAccessError):
+    def __init__(self) -> None:
+        super().__init__(
+            "document_text_too_large",
+            "O texto extraído deste PDF excede o limite de armazenamento por usuário.",
         )
 
 
@@ -48,14 +57,20 @@ def extracted_from_row(row: Document) -> ExtractedDocument:
     return ExtractedDocument(page_count=row.page_count, pages=pages)
 
 
-def purge_expired(db: Session, user_id: str | None = None) -> None:
-    now = utcnow()
-    query = select(Document).where(Document.expires_at <= now)
+def purge_expired(db: Session, user_id: str | None = None) -> int:
+    """Remove documentos vencidos (e, em cascata, suas conversas). Sem user_id, de todos."""
+    query = select(Document).where(Document.expires_at <= utcnow())
     if user_id is not None:
         query = query.where(Document.user_id == user_id)
-    for row in db.scalars(query).all():
+    rows = db.scalars(query).all()
+    for row in rows:
         db.delete(row)
     db.commit()
+    return len(rows)
+
+
+def _find_by_hash(db: Session, user_id: str, file_hash: str) -> Document | None:
+    return db.scalar(select(Document).where(Document.user_id == user_id, Document.content_hash == file_hash))
 
 
 def save_document(
@@ -68,15 +83,13 @@ def save_document(
     settings: Settings,
 ) -> tuple[Document, bool]:
     purge_expired(db, user_id)
-    existing = db.scalar(
-        select(Document).where(Document.user_id == user_id, Document.content_hash == file_hash)
-    )
-    if existing is not None and existing.expires_at > utcnow():
+    existing = _find_by_hash(db, user_id, file_hash)
+    if existing is not None:
         return existing, True
 
     incoming_chars = sum(len(page.text) for page in extracted.pages)
     if incoming_chars > settings.max_stored_text_chars:
-        raise DocumentStoreFullError()
+        raise DocumentTooLargeError()
 
     used_chars = db.scalar(
         select(func.coalesce(func.sum(Document.text_chars), 0)).where(Document.user_id == user_id)
@@ -98,7 +111,15 @@ def save_document(
         expires_at=now + timedelta(seconds=settings.document_ttl_seconds),
     )
     db.add(row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # O mesmo PDF enviado duas vezes ao mesmo tempo: a restrição única mantém um só.
+        db.rollback()
+        existing = _find_by_hash(db, user_id, file_hash)
+        if existing is None:
+            raise
+        return existing, True
     db.refresh(row)
     return row, False
 
