@@ -1,12 +1,9 @@
-import os
 from logging.config import fileConfig
-
-os.environ.setdefault("JWT_SECRET", "migration-placeholder-secret-key-32")
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.core.config import get_settings
+from app.core.config import get_database_url
 from app.db.base import Base
 from app.db import models  # noqa: F401
 
@@ -14,7 +11,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+config.set_main_option("sqlalchemy.url", get_database_url())
 target_metadata = Base.metadata
 
 

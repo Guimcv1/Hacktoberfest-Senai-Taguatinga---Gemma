@@ -1,13 +1,10 @@
 import inspect
 import uuid
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from app.core.config import get_settings
-from app.main import app
-from tests.helpers import build_pdf
+from tests.helpers import build_pdf, override_settings
 
 UPLOAD_URL = "/api/documents"
 
@@ -85,22 +82,10 @@ def test_upload_rejects_pdf_without_extractable_text(client: TestClient, auth_he
 
 
 def test_upload_rejects_file_above_size_limit(client: TestClient, auth_headers: dict[str, str]) -> None:
-    content = build_pdf(["Conteudo dentro do limite original"])
-    real = get_settings()
-    app.dependency_overrides[get_settings] = lambda: SimpleNamespace(
-        max_pdf_size_bytes=64,
-        max_pdf_pages=50,
-        max_stored_documents=50,
-        max_stored_text_chars=400000,
-        document_ttl_seconds=1800,
-        jwt_secret=real.jwt_secret,
-        jwt_algorithm=real.jwt_algorithm,
-        jwt_expires_minutes=real.jwt_expires_minutes,
-    )
-    try:
-        response = _post_file(client, content, auth_headers)
-    finally:
-        app.dependency_overrides.pop(get_settings, None)
+    override_settings(max_pdf_size_mb=1)
+    content = b"%PDF-1.4\n" + b"0" * (1024 * 1024)
+
+    response = _post_file(client, content, auth_headers)
 
     assert response.status_code == 413
     assert response.json()["detail"] == "Arquivo excede o tamanho máximo permitido."

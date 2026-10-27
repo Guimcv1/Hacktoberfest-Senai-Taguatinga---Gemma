@@ -30,9 +30,9 @@ def create_access_token(user_id: str, settings: Settings) -> tuple[str, str, dat
         "iat": datetime.now(timezone.utc),
         "type": "access",
     }
-    token = jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    token = jwt.encode(payload, settings.jwt_secret.get_secret_value(), algorithm=settings.jwt_algorithm)
     return token, jti, expires_at
 
 
 def decode_access_token(token: str, settings: Settings) -> dict:
-    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    return jwt.decode(token, settings.jwt_secret.get_secret_value(), algorithms=[settings.jwt_algorithm])

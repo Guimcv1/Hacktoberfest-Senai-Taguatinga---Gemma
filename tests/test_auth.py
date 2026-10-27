@@ -52,7 +52,7 @@ def test_expired_token_is_rejected(client: TestClient) -> None:
             "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
             "type": "access",
         },
-        settings.jwt_secret,
+        settings.jwt_secret.get_secret_value(),
         algorithm=settings.jwt_algorithm,
     )
     response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})

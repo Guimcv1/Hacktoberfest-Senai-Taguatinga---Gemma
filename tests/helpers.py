@@ -2,6 +2,16 @@ import fitz
 from fastapi.testclient import TestClient
 
 
+def override_settings(**updates):
+    """Substitui as configurações injetadas nas rotas; o conftest desfaz ao fim do teste."""
+    from app.core.config import get_settings
+    from app.main import app
+
+    current = get_settings().model_copy(update=updates)
+    app.dependency_overrides[get_settings] = lambda: current
+    return current
+
+
 def build_pdf(pages: list[str]) -> bytes:
     """Cria um PDF em memória, uma página por item da lista."""
     document = fitz.open()
