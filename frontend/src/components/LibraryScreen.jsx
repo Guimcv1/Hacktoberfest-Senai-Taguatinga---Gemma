@@ -37,7 +37,7 @@ export default function LibraryScreen({ courses, onOpenStudy, onNewStudy, onDele
       <div className="course-head"><span className="goal-symbol">{course.title.slice(0, 2).toUpperCase()}</span><div><span className="course-status">{course.status || 'Ativo'}</span><button className="edit-course" onClick={() => startEditing(course)}>Editar dados</button></div></div>
       {editing === course.id ? <EditModal draft={draft} setDraft={setDraft} onSave={saveEditing} onCancel={() => setEditing(null)} /> : <h2>{course.title}</h2>}
       <p>{course.detail}</p><div className="course-method"><span>Método</span><b>{course.method}</b></div><div className="course-progress"><div><small>Progresso</small><b>{course.progress}%</b></div><i><em style={{ width: `${course.progress}%` }} /></i></div>
-      <div className="course-actions"><button className="study-button" onClick={() => onOpenStudy(course)}>Abrir estudo <span>→</span></button><button className="text-danger" onClick={() => onAbandon(course)}>Desistir</button><button className="text-danger" onClick={() => onDelete(course)}>Excluir</button></div>
+      <div className="course-actions"><button className="study-button" onClick={() => onOpenStudy(course)}>{course.status === 'Abandonado' ? 'Retomar estudo' : 'Abrir estudo'} <span>→</span></button>{course.status !== 'Abandonado' && <button className="text-danger" onClick={() => onAbandon(course)}>Desistir</button>}<button className="text-danger" onClick={() => onDelete(course)}>Excluir</button></div>
     </article>)}</div>
   </section>
 }
