@@ -60,6 +60,7 @@ def test_ai_client_sends_confirmed_payload() -> None:
     assert recorded["payload"]["model"] == "gemma3:4b"
     assert recorded["payload"]["stream"] is False
     assert recorded["payload"]["keep_alive"] == "120s"
+    assert "format" not in recorded["payload"]
     assert recorded["payload"]["messages"][0]["role"] == "system"
     assert recorded["payload"]["messages"][1]["role"] == "user"
     assert "O que e mitose?" in recorded["payload"]["messages"][1]["content"]
@@ -67,6 +68,27 @@ def test_ai_client_sends_confirmed_payload() -> None:
     assert result.content == "Texto gerado pelo modelo"
     assert result.model == "gemma3:4b"
     assert "http://ai.test" not in result.content
+
+
+def test_generate_completion_json_mode_keeps_alive_and_requests_json() -> None:
+    recorded: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        recorded.append(json.loads(request.content))
+        return httpx.Response(200, json=VALID_RESPONSE)
+
+    client = AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(handler))
+    result = asyncio.run(
+        client.generate_completion(
+            messages=[{"role": "user", "content": "Gere JSON"}],
+            json_mode=True,
+        )
+    )
+
+    assert recorded[0]["format"] == "json"
+    assert recorded[0]["keep_alive"] == "120s"
+    assert recorded[0]["stream"] is False
+    assert result.content == "Texto gerado pelo modelo"
 
 
 def test_ai_client_accepts_valid_ollama_response() -> None:

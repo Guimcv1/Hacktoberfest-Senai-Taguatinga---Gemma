@@ -27,6 +27,12 @@ def test_app_initializes() -> None:
     assert "/ready" in schema["paths"]
     assert "/api/conversations" in schema["paths"]
     assert "/api/conversations/{conversation_id}/documents" in schema["paths"]
+    assert "/api/conversations/{conversation_id}/questions/generate" in schema["paths"]
+    assert "/api/conversations/{conversation_id}/questions" in schema["paths"]
+    generate = schema["paths"]["/api/conversations/{conversation_id}/questions/generate"]["post"]
+    assert generate.get("security")
+    request_schema = schema["components"]["schemas"]["GenerateQuestionsRequest"]
+    assert "observation" not in request_schema.get("required", [])
     paths = {getattr(route, "path", None) for route in app.routes}
     assert "/docs" in paths
     assert "/openapi.json" in paths

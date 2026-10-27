@@ -40,7 +40,9 @@ Não há dependência circular: conversa e PDF são independentes.
 5. **Associar depois:** `POST /api/conversations/{id}/documents` `{"document_id": "<id>"}`.
 6. **Perguntar de novo** no mesmo `conversation_id`: a recuperação usa só os PDFs dessa conversa.
 7. Atalhos compatíveis (não obrigatórios): `document_id` no chat, ou `conversation_id` no form do upload, se a conversa já existir e for do mesmo usuário.
-8. Não use a URL do Ollama no browser. Configure `CORS_ORIGINS`.
+8. **Gerar questões da conversa selecionada:** `POST /api/conversations/{id}/questions/generate` com `{}` ou preferências (`observation`, `quantity`, `difficulty`). Mostre loading; a inferência pode levar dezenas de segundos.
+9. **Relistar sem nova IA:** `GET /api/conversations/{id}/questions`.
+10. Não use a URL do Ollama no browser. Configure `CORS_ORIGINS`.
 
 ### Mudança de contrato
 
@@ -75,6 +77,8 @@ Clientes antigos que ainda enviam `document_id` no chat continuam funcionando.
 | GET | `/api/conversations` | sim | listagem |
 | GET | `/api/conversations/{id}` | sim | histórico |
 | POST | `/api/conversations/{id}/documents` | sim | anexa PDF existente |
+| POST | `/api/conversations/{id}/questions/generate` | sim | gera questões (Gemma) e persiste o conjunto |
+| GET | `/api/conversations/{id}/questions` | sim | conjuntos já gerados, mais recentes primeiro |
 | DELETE | `/api/conversations/{id}` | sim | apaga a conversa |
 | DELETE | `/api/conversations/{id}/messages` | sim | limpa mensagens |
 
@@ -118,6 +122,80 @@ Resposta:
 
 O texto extraído do PDF é persistido uma vez no upload; as mensagens seguintes não reprocessam o arquivo.
 
+### Geração de questões (201)
+
+Usa a conversa já selecionada: **não** cria outra conversa e **não** exige upload. O histórico da conversa não é alterado.
+
+Pedido (`observation` pode ser omitida, `null` ou `""`):
+
+```json
+{
+  "observation": "Crie 10 questões difíceis, no estilo ENEM, priorizando os conceitos mais importantes e incluindo explicações detalhadas.",
+  "quantity": 10,
+  "difficulty": "hard",
+  "question_type": "multiple_choice"
+}
+```
+
+| Campo | Padrão | Limites |
+| --- | --- | --- |
+| `observation` | ausente | opcional; no máximo 500 caracteres; em branco vira ausente |
+| `quantity` | 5 | inteiro de 1 a 10 |
+| `difficulty` | `medium` | `easy`, `medium` ou `hard` |
+| `question_type` | `multiple_choice` | só múltipla escolha nesta versão |
+
+Resposta:
+
+```json
+{
+  "id": "uuid-do-conjunto",
+  "conversation_id": "uuid",
+  "observation": "Crie 10 questões difíceis, estilo ENEM",
+  "quantity": 10,
+  "difficulty": "hard",
+  "question_type": "multiple_choice",
+  "questions": [
+    {
+      "stem": "Enunciado",
+      "choices": [
+        {"id": "A", "text": "alternativa A"},
+        {"id": "B", "text": "alternativa B"},
+        {"id": "C", "text": "alternativa C"},
+        {"id": "D", "text": "alternativa D"}
+      ],
+      "correct_option": "A",
+      "explanation": "Por que A está correta.",
+      "difficulty": "hard"
+    }
+  ],
+  "used_documents": true,
+  "has_relevant_match": true,
+  "sources": [{"page": 2, "excerpt": "trecho real", "document_id": "uuid", "filename": "aula.pdf"}],
+  "model": "gemma3:4b",
+  "created_at": "2026-10-27T12:00:00Z"
+}
+```
+
+Como o frontend pode renderizar:
+
+1. Botão **Gerar questões** na conversa selecionada; campo opcional de observação.
+2. Estado de carregamento até o `201`.
+3. Para cada item em `questions`: enunciado (`stem`), alternativas A–D (`choices`), gabarito (`correct_option` — só marcar depois de conferir que existe em `choices`) e `explanation`.
+4. Se `used_documents` e `has_relevant_match`, mostrar `sources` (páginas reais). Se `used_documents` e não `has_relevant_match`, avisar que o PDF não teve trechos alinhados e as questões não estão comprovadamente fundamentadas no documento.
+5. Sem PDF: `used_documents` é `false` e `sources` é `[]`; as questões vêm do histórico e do conhecimento geral do Gemma.
+6. Guardar `id` do conjunto ou reler com `GET /api/conversations/{id}/questions` — **não** é preciso chamar a IA de novo.
+
+Comportamento e erros:
+
+- Sem histórico substancial (cerca de 80 caracteres no total) e sem PDF: `422` “A conversa ainda não tem conteúdo suficiente para gerar questões.”
+- Conversa inexistente ou de outra conta: `404`.
+- Quantidade, dificuldade ou observação inválidas: `422` com `errors`.
+- JSON inválido, alternativas incompletas ou gabarito que não existe: uma tentativa de correção; se falhar, `502`.
+- Timeout ou Ollama indisponível: `503`, sem vazar URL nem detalhes internos.
+- `sources` vêm só da recuperação lexical do backend. O modelo não inventa páginas na resposta da API.
+
+Os conjuntos ficam na tabela `question_sets`, ligados à conversa e ao usuário. Apagar a conversa remove os conjuntos.
+
 ## Recuperação documental
 
 - Lexical (sem embeddings). Só os documentos **da conversa atual**.
@@ -126,7 +204,7 @@ O texto extraído do PDF é persistido uma vez no upload; as mensagens seguintes
 
 ## Ollama e memória do modelo
 
-O cliente envia `keep_alive` em cada `POST /api/chat` ao Ollama. Padrão: `120s`.
+O cliente envia `keep_alive` em cada `POST /api/chat` ao Ollama (chat e geração de questões). Padrão: `120s`. A geração pede `format: json` nesse mesmo contrato.
 
 | Variável | Função |
 | --- | --- |
@@ -189,3 +267,5 @@ A suíte usa SQLite em memória e **mock da IA**. Não depende do túnel.
 - Rate limit em memória por processo; não compartilha entre workers.
 - JWT sem refresh; logout só invalida o `jti` apresentado.
 - O histórico enviado ao modelo é truncado por `MAX_CONTEXT_CHARS`; mensagens antigas podem ficar de fora do prompt, mas permanecem no banco.
+- A qualidade pedagógica das questões depende do Gemma 3:4b; a suíte de testes usa mock da IA e não valida o modelo real.
+- Só há múltipla escolha (A–D) nesta versão; outros tipos de questão ainda não estão implementados.

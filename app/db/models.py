@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Column, ForeignKey, Integer, String, Table, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -38,6 +38,7 @@ class User(Base):
 
     documents: Mapped[list[Document]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     conversations: Mapped[list[Conversation]] = relationship(back_populates="owner", cascade="all, delete-orphan")
+    question_sets: Mapped[list[QuestionSet]] = relationship(back_populates="owner", cascade="all, delete-orphan")
 
 
 class Document(Base):
@@ -86,6 +87,10 @@ class Conversation(Base):
         cascade="all, delete-orphan",
         order_by="Message.created_at",
     )
+    question_sets: Mapped[list[QuestionSet]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+    )
 
 
 class Message(Base):
@@ -100,6 +105,27 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime())
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+
+
+class QuestionSet(Base):
+    __tablename__ = "question_sets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    observation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    quantity: Mapped[int] = mapped_column(Integer)
+    difficulty: Mapped[str] = mapped_column(String(16))
+    question_type: Mapped[str] = mapped_column(String(32))
+    used_documents: Mapped[bool] = mapped_column(Boolean)
+    has_relevant_match: Mapped[bool] = mapped_column(Boolean)
+    sources_json: Mapped[str] = mapped_column(Text)
+    questions_json: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime())
+
+    conversation: Mapped[Conversation] = relationship(back_populates="question_sets")
+    owner: Mapped[User] = relationship(back_populates="question_sets")
 
 
 class RevokedToken(Base):

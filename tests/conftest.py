@@ -52,6 +52,9 @@ class _BlockedAIClient:
     async def generate_explanation(self, **kwargs):
         raise AssertionError("Os testes não devem chamar o serviço real de IA.")
 
+    async def generate_completion(self, **kwargs):
+        raise AssertionError("Os testes não devem chamar o serviço real de IA.")
+
     async def ping(self, **kwargs):
         raise AssertionError("Os testes não devem chamar o serviço real de IA.")
 

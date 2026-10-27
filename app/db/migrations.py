@@ -59,7 +59,12 @@ def upgrade_database(engine: Engine) -> None:
             existing = _BASELINE_TABLES & tables
             if existing == _BASELINE_TABLES:
                 # create_all de versões novas já inclui tabelas posteriores à 001.
-                revision = head_revision() if "conversation_documents" in tables else BASELINE_REVISION
+                if "question_sets" in tables:
+                    revision = head_revision()
+                elif "conversation_documents" in tables:
+                    revision = "002"
+                else:
+                    revision = BASELINE_REVISION
                 logger.warning(
                     "Banco sem histórico de migrações; registrando a revisão %s.",
                     revision,

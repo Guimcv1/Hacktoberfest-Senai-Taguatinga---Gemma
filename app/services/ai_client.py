@@ -127,9 +127,6 @@ class AIClient:
         has_relevant_match: bool = True,
         has_material: bool = False,
     ) -> AIExplanation:
-        if not self.is_configured():
-            raise AIUnavailableError()
-
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         for turn in history or []:
             role = turn.get("role")
@@ -147,20 +144,30 @@ class AIClient:
                 ),
             }
         )
+        return await self.generate_completion(messages=messages)
 
-        payload = {
+    async def generate_completion(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        json_mode: bool = False,
+    ) -> AIExplanation:
+        if not self.is_configured():
+            raise AIUnavailableError()
+
+        payload: dict = {
             "model": self._model,
             "messages": messages,
             "stream": False,
             # keep_alive é do Ollama: após este intervalo sem novas chamadas, o modelo sai da RAM.
-            # O temporizador recomeça a cada POST /api/chat bem-sucedido; o processo do Ollama continua.
             "keep_alive": keep_alive_json_value(self._keep_alive),
         }
+        if json_mode:
+            payload["format"] = "json"
 
         timeout = httpx.Timeout(self._timeout_seconds, connect=min(10.0, self._timeout_seconds))
         url = f"{self._base_url}/api/chat"
         try:
-            # Sem seguir redirecionamentos: um 307/308 reenviaria o material do aluno a outro host.
             async with httpx.AsyncClient(
                 timeout=timeout,
                 transport=self._transport,

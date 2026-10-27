@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.core.deps import get_current_user
-from app.db.models import Document, User
+from app.db.models import User
 from app.db.session import get_db
-from app.schemas.chat import ChatRequest, ChatResponse, ChatSource
+from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.ai_client import AIClient, AIClientError, AIInvalidResponseError, get_ai_client
 from app.services.conversations import (
     ConversationNotFoundError,
@@ -23,14 +23,12 @@ from app.services.conversations import (
     link_document,
     sync_primary_document,
 )
-from app.services.document_repo import DocumentNotFoundError, extracted_from_row, get_owned_document
-from app.services.retrieval import best_excerpt, format_context, query_terms, retrieve_from_documents
+from app.services.document_repo import DocumentNotFoundError, get_owned_document
+from app.services.study_context import document_context
 
 logger = logging.getLogger("studybuddy")
 
 router = APIRouter(prefix="/api", tags=["chat"])
-
-_MAX_EXCERPT_CHARS = 400
 
 
 @router.post(
@@ -70,7 +68,7 @@ async def chat(
     if extra_document is not None and extra_document.id not in {item.id for item in documents}:
         documents.append(extra_document)
 
-    pages, has_match, context, sources = _document_context(documents, message, settings)
+    context, has_match, sources = document_context(documents, message, settings)
     history = history_for_model(conversation.messages, max_chars=settings.max_context_chars) if conversation else []
     # Encerra a transação de leitura: a conexão não fica presa ao pool durante a chamada à IA.
     db.commit()
@@ -122,7 +120,7 @@ async def chat(
         "Chat respondido: conversation_id=%s documents=%s pages=%s",
         conversation.id,
         document_ids,
-        [page.page_number for page in pages],
+        [source.page for source in sources],
     )
     return ChatResponse(
         conversation_id=conversation.id,
@@ -135,36 +133,3 @@ async def chat(
         has_relevant_match=has_match,
         used_documents=bool(documents),
     )
-
-
-def _document_context(
-    documents: list[Document],
-    message: str,
-    settings: Settings,
-) -> tuple[list, bool, str, list[ChatSource]]:
-    if not documents:
-        return [], False, "", []
-    corpus = [
-        (document.id, document.filename, extracted_from_row(document))
-        for document in documents
-    ]
-    pages, has_match = retrieve_from_documents(
-        corpus,
-        message,
-        max_excerpts=settings.max_retrieval_pages,
-        max_chars=settings.max_context_chars,
-    )
-    terms = query_terms(message)
-    context = format_context(pages)
-    sources: list[ChatSource] = []
-    if has_match:
-        sources = [
-            ChatSource(
-                page=page.page_number,
-                excerpt=best_excerpt(" ".join(page.text.split()), terms, _MAX_EXCERPT_CHARS),
-                document_id=page.document_id or None,
-                filename=page.filename or None,
-            )
-            for page in pages
-        ]
-    return pages, has_match, context, sources

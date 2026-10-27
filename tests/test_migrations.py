@@ -29,6 +29,7 @@ APP_TABLES = {
     "conversations",
     "conversation_documents",
     "messages",
+    "question_sets",
     "revoked_tokens",
 }
 
@@ -54,6 +55,19 @@ def test_upgrade_creates_schema_identical_to_models(file_engine) -> None:
 
     assert current_revision(file_engine) == head_revision()
     assert APP_TABLES <= set(inspect(file_engine).get_table_names())
+    assert _schema_diff(file_engine) == []
+
+
+def test_upgrade_from_002_adds_question_sets(file_engine) -> None:
+    config = alembic_config()
+    with file_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "002")
+
+    assert "question_sets" not in inspect(file_engine).get_table_names()
+    upgrade_database(file_engine)
+    assert "question_sets" in inspect(file_engine).get_table_names()
+    assert current_revision(file_engine) == head_revision()
     assert _schema_diff(file_engine) == []
 
 
