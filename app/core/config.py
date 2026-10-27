@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     ai_model: str = "gemma3:4b"
     ai_timeout_seconds: float = Field(default=120.0, gt=0)
     database_url: str = DEFAULT_DATABASE_URL
+    db_auto_migrate: bool = True
     jwt_secret: SecretStr
     jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
     jwt_expires_minutes: int = Field(default=480, ge=5)
