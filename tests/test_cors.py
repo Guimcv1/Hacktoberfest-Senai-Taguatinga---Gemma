@@ -13,6 +13,17 @@ def test_cors_allows_configured_origin(client: TestClient) -> None:
     assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
 
 
+def test_cors_ignores_unknown_origin(client: TestClient) -> None:
+    response = client.options(
+        "/health",
+        headers={
+            "Origin": "http://site-desconhecido.example",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.headers.get("access-control-allow-origin") is None
+
+
 def test_request_id_header_is_returned(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200

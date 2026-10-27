@@ -35,6 +35,7 @@ class Settings(BaseSettings):
 
     app_name: str = "StudyBuddy AI"
     environment: Literal["development", "test", "production"] = "development"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     ai_base_url: str = ""
     ai_model: str = "gemma3:4b"
     ai_timeout_seconds: float = Field(default=120.0, gt=0)
@@ -52,7 +53,8 @@ class Settings(BaseSettings):
     max_chat_message_chars: int = Field(default=2000, ge=50)
     max_retrieval_pages: int = Field(default=3, ge=1)
     max_context_chars: int = Field(default=6000, ge=200)
-    rate_limit_per_minute: int = Field(default=60, ge=5)
+    rate_limit_per_minute: int = Field(default=60, ge=0)
+    rate_limit_auth_per_minute: int = Field(default=20, ge=0)
 
     @property
     def max_pdf_size_bytes(self) -> int:
@@ -70,6 +72,11 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_environment(cls, value: object) -> object:
         return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def normalize_log_level(cls, value: object) -> object:
+        return value.strip().upper() if isinstance(value, str) else value
 
     @field_validator("jwt_secret")
     @classmethod
