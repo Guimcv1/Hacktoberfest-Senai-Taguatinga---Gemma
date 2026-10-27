@@ -1,190 +1,158 @@
-# Hacktoberfest-Senai-Taguatinga---Gemma
+# StudyBuddy AI — Hacktoberfest Senai Taguatinga
 
-# Equipe :
+Plataforma inteligente de estudos onde estudantes interagem com um professor virtual potencializado pelo modelo **Gemma 4 E4B (`gemma4:e4b`)** via **Ollama**. Suporta cadastro e autenticação de usuários, metas de estudos, upload de materiais em PDF com extração de texto e recuperação contextual, e chat interativo com comandos de voz e sintetizador de fala.
 
-- Humberto Gabriel Bezerra de Oliveira - humbertobezerradeoliveira@gmail.com
-- Guilherme Martins Coelho Vilmar - guimcvilmar@gmail.com
-- Arthur Nunes de Carvalho - arthurnunescarvalho2@gmail.com
+## Equipe
 
-<<<<<<< HEAD
-## Executar com Docker Compose
+- **Arthur Nunes de Carvalho** — arthurnunescarvalho2@gmail.com
+- **Guilherme Martins Coelho Vilmar** — guimcvilmar@gmail.com
+- **Humberto Gabriel Bezerra de Oliveira** — humbertobezerradeoliveira@gmail.com
 
-A aplicação completa é orquestrada pelo [`compose.yaml`](./compose.yaml). O frontend
-é o único serviço exposto ao host; ele encaminha `/api` para o backend pela rede
-interna do Docker. PostgreSQL, Ollama e backend não publicam portas.
+---
 
-1. Copie `.env.example` para `.env` e altere `JWT_SECRET` e `POSTGRES_PASSWORD`.
-2. Baixe o modelo no Ollama:
-
-   ```powershell
-   docker compose run --rm ollama ollama pull gemma4:e4b
-   ```
-
-3. Suba os serviços:
-
-   ```powershell
-   docker compose up --build -d
-   ```
-
-4. Acesse `http://localhost:8080` (ou a porta definida em `APP_PORT`).
-
-Para acompanhar a inicialização:
-
-```powershell
-docker compose logs -f backend frontend
-```
-=======
-## Frontend (desenvolvimento)
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-O Vite encaminha `/api`, `/health` e `/ready` para `http://127.0.0.1:8000`. Deixe `VITE_API_URL` vazio. Não use o hostname interno `backend` no navegador.
-
-## Implantação Docker
-
-Os arquivos de Compose **não foram executados nesta máquina** (Docker não está instalado). A implantação precisa ser validada no servidor de destino.
-
-O código do backend vive na branch `backend`; o do frontend, nesta branch (`frontend/`). O `docker-compose.yml` constrói cada serviço a partir do GitHub:
-
-- backend: `...Gemma.git#backend`
-- frontend: `...Gemma.git#frontend:frontend`
-
-Assim não é necessário ter as duas árvores no mesmo checkout. O servidor precisa clonar o repositório durante o `docker compose build`. A branch `main` não é usada.
-
-Neste checkout da branch `frontend`, para construir a UI localmente:
-
-```bash
-BACKEND_CONTEXT=https://github.com/Guimcv1/Hacktoberfest-Senai-Taguatinga---Gemma.git#backend
-FRONTEND_CONTEXT=./frontend
-```
-
-Não use `docker compose down -v` na atualização normal.
-
-### Arquitetura
+## Arquitetura do Projeto
 
 ```text
-navegador --> :8080 frontend (Nginx)
-                 ├─ /        UI
-                 └─ /api     proxy --> backend:8000 (1 worker)
-                                    ├─ postgres (volume pgdata)
-                                    ├─ /data/documents (volume documents)
-                                    └─ ollama:11434 (volume ollama)
+Host / Navegador
+      │
+      ▼  (Porta 8080)
+┌────────────────────────────────────────────────────────┐
+│ Nginx (Frontend Container)                             │
+│ ├─ Serve aplicação React SPA (Vite build)              │
+│ └─ Proxy reverso /api/  ───────────────────────┐       │
+└────────────────────────────────────────────────┼───────┘
+                                                 │
+                               Rede Docker       ▼
+┌────────────────────────────────────────────────────────┐
+│ FastAPI (Backend Container :8000)                      │
+│ ├─ Autenticação JWT & CORS                             │
+│ ├─ Extração de texto de PDFs (PyMuPDF)                 │
+│ ├─ Histórico de conversas e perguntas                  │
+│ ├─ PostgreSQL (Container :5432)                        │
+│ └─ Ollama / Gemma 4 E4B (Container :11434)             │
+└────────────────────────────────────────────────────────┘
 ```
 
-PostgreSQL e Ollama **não** têm porta publicada por padrão. Só a porta da UI (`PUBLISH_PORT`, padrão 8080) é exposta.
+- **Isolamento de Segurança**: Apenas a porta do frontend (`8080`) é exposta para o host. O PostgreSQL, o Ollama e a API FastAPI comunicam-se exclusivamente pela rede interna do Docker (`app-network`).
+- **Nginx como Proxy Reverso**: Todas as requisições `/api/` feitas pelo frontend são encaminhadas internamente pelo Nginx para o backend, eliminando problemas de CORS e URLs hardcoded no navegador.
 
-O backend sobe com **um único worker**. Não escale o serviço `backend`. O descarregamento do modelo é global para quem compartilha o mesmo Ollama e **não** apaga os arquivos instalados.
+---
 
-### Pré-requisitos no servidor
+## Executar com Docker Compose (Recomendado)
 
-- Docker Engine e Docker Compose v2
-- Rede para clonar o GitHub no build e para o primeiro `ollama pull`
-- Disco para o modelo Gemma 4 E4B (vários gigabytes) + PDFs + PostgreSQL
-- RAM suficiente para carregar `gemma4:e4b` em CPU (confira no hardware; não há garantia de desempenho)
-- GPU é **opcional** e depende de drivers no host; a configuração básica é CPU
+### 1. Pré-requisitos
 
-### Configuração inicial
+- Docker Engine e Docker Compose instalados e em execução.
+
+### 2. Configurar o ambiente
+
+Copie o arquivo de exemplo `.env.example` para `.env` na raiz do projeto:
 
 ```bash
-git clone -b frontend https://github.com/Guimcv1/Hacktoberfest-Senai-Taguatinga---Gemma.git studybuddy
-cd studybuddy
 cp .env.example .env
-# edite JWT_SECRET (32+ caracteres)
-# edite POSTGRES_PASSWORD (evite @ : / na senha)
-# CORS_ORIGINS=http://SEU_HOST:8080  se não for localhost
 ```
 
-Também é possível clonar `-b backend`; o Compose é o mesmo.
+*(No Windows PowerShell: `Copy-Item .env.example .env`)*
 
-### Build e inicialização
+Abra o `.env` e defina as variáveis obrigatórias:
+
+- `JWT_SECRET`: segredo aleatório com pelo menos 32 caracteres (ex.: gerado com `python -c "import secrets; print(secrets.token_urlsafe(48))"`).
+- `POSTGRES_PASSWORD`: senha segura para o banco PostgreSQL.
+
+### 3. Baixar o modelo no Ollama
+
+Antes ou após iniciar os serviços, faça o download do modelo Gemma 4 E4B no volume do Ollama:
 
 ```bash
-docker compose build
-docker compose up -d
-docker compose ps
-docker compose logs -f frontend
+docker compose run --rm ollama ollama pull gemma4:e4b
 ```
 
-O backend aplica `alembic upgrade head` no entrypoint, antes de publicar a API.
+### 4. Subir a aplicação
 
-### Modelo Gemma 4 E4B (manual)
-
-A API **não** executa `ollama pull`. Depois dos contêineres saudáveis:
+Construa as imagens e inicie todos os contêineres:
 
 ```bash
-docker compose exec ollama ollama pull gemma4:e4b
-docker compose exec ollama ollama list
+docker compose up -d --build
 ```
 
-A primeira inferência (e a primeira após unload) pode demorar enquanto o modelo entra na memória.
+### 5. Acessar a aplicação
 
-### Verificar serviços
+Acesse no seu navegador:
 
-```bash
-curl -sS http://localhost:8080/
-curl -sS http://localhost:8080/health
-docker compose logs backend
-docker compose logs postgres
-docker compose logs ollama
-```
+[http://localhost:8080](http://localhost:8080)
 
-A UI fala com o backend pela **mesma origem** (`/api` no Nginx).
+---
 
-### Atualizar sem apagar dados
+## Comandos Úteis
 
-```bash
-git pull
-docker compose build
-docker compose up -d
-```
+| Ação | Comando |
+| :--- | :--- |
+| **Ver logs em tempo real** | `docker compose logs -f` |
+| **Ver logs específicos** | `docker compose logs -f backend frontend` |
+| **Ver status dos contêineres** | `docker compose ps` |
+| **Parar os serviços** | `docker compose stop` |
+| **Derrubar serviços e rede** | `docker compose down` |
+| **Derrubar e apagar volumes** *(Atenção: apaga banco e modelos)* | `docker compose down -v` |
+| **Verificar saúde da API** | Acesse `http://localhost:8080/health` |
 
-Isso recria **contêineres**, não volumes. **Não** use `docker compose down -v`.
+---
 
-| Ação | O que acontece |
-| --- | --- |
-| `docker compose stop` / `start` | para/inicia; volumes intactos |
-| `docker compose up -d --build` | nova imagem; volumes intactos |
-| `ollama pull gemma4:e4b` | baixa/atualiza pesos no volume `ollama` |
-| `docker compose down -v` | **apaga** PostgreSQL, PDFs e modelos |
+## Desenvolvimento Local (Sem Docker)
 
-### Volumes
+### Backend (Python FastAPI)
 
-| Volume | Dados |
-| --- | --- |
-| `pgdata` | usuários, conversas, mensagens, questões, texto extraído |
-| `documents` | PDFs originais |
-| `ollama` | arquivos do modelo |
+1. Acesse o diretório `backend`:
 
-Volumes **não** são backup. Recomendação (não executada aqui):
+   ```bash
+   cd backend
+   ```
 
-```bash
-docker compose exec postgres pg_dump -U studybuddy studybuddy > backup.sql
-docker compose cp backend:/data/documents ./backup-documents
-```
+2. Crie e ative um ambiente virtual:
 
-### Parar
+   ```bash
+   python -m venv .venv
+   # Windows:
+   .venv\Scripts\activate
+   # Linux/macOS:
+   source .venv/bin/activate
+   ```
 
-```bash
-docker compose stop      # mantém volumes
-docker compose down      # remove contêineres e rede; mantém volumes nomeados
-```
+3. Instale as dependências:
 
-### Diagnóstico
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-- Backend não sobe: `docker compose logs backend` — JWT_SECRET, senha do Postgres, migração.
-- Postgres unhealthy: senha/usuário do `.env` diferentes dos do volume já criado.
-- Ollama unreachable: `AI_BASE_URL` deve ser `http://ollama:11434` na rede do Compose.
-- 503 na IA: modelo não puxado, ou primeira carga ainda em andamento.
-- Unload 409: há inferência neste processo; aguarde.
-- UI sem API: o Nginx precisa resolver o serviço `backend`; o navegador não deve chamar `http://backend`.
+4. Inicie o servidor:
 
-### CPU / GPU
+   ```bash
+   uvicorn app.main:app --reload --port 8000
+   ```
 
-A configuração publicada não exige GPU. Aceleração NVIDIA exigiria Compose extra e NVIDIA Container Toolkit no host — isso **não** foi validado aqui.
+### Frontend (React + Vite)
 
-A stack Docker foi **preparada, não executada** neste ambiente.
->>>>>>> e10bbaba10e3d0af0f7636072277845496b3bb03
+1. Acesse o diretório `frontend`:
+
+   ```bash
+   cd frontend
+   ```
+
+2. Instale as dependências:
+
+   ```bash
+   npm install
+   ```
+
+3. Inicie o servidor Vite:
+
+   ```bash
+   npm run dev
+   ```
+
+   *(O Vite já está configurado para repassar `/api` para `http://127.0.0.1:8000` em desenvolvimento).*
+
+---
+
+## Licença
+
+Este projeto está licenciado sob a licença [MIT](LICENSE).

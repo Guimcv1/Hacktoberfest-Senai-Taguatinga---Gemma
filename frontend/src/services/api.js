@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
-=======
-const API_URL = import.meta.env.VITE_API_URL ?? ''
->>>>>>> e10bbaba10e3d0af0f7636072277845496b3bb03
+const API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '')
 
 async function request(path, options = {}) {
   const headers = new Headers(options.headers)

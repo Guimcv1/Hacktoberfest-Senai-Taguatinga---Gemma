@@ -12,6 +12,7 @@ export default function StudyScreen({ study, token, onBack, onDelete, onAbandon,
   const [isLoading, setIsLoading] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [chatMessages, setChatMessages] = useState([])
+  const [conversationId, setConversationId] = useState(study?.conversationId || null)
 
   function toggleMicrophone() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -47,12 +48,15 @@ export default function StudyScreen({ study, token, onBack, onDelete, onAbandon,
     setIsLoading(true)
     try {
       const payload = { message: text }
+      if (conversationId) payload.conversation_id = conversationId
       if (documentIds[0]) payload.document_id = documentIds[0]
       const response = await askQuestion(token, payload)
-      setAnswer(response.answer || 'Não consegui gerar uma resposta agora.')
-      setChatMessages((current) => [...current, { role: 'tutor', text: response.answer || 'Não consegui gerar uma resposta agora.' }])
+      if (response?.conversation_id) setConversationId(response.conversation_id)
+      const answerText = response?.answer || 'Não consegui gerar uma resposta agora.'
+      setAnswer(answerText)
+      setChatMessages((current) => [...current, { role: 'tutor', text: answerText }])
     } catch (error) {
-      const errorMessage = 'Ocorreu um erro da nossa parte. Tente novamente em alguns instantes.'
+      const errorMessage = error instanceof Error ? error.message : 'Ocorreu um erro ao comunicar com a IA. Tente novamente.'
       setAnswer(errorMessage)
       setChatMessages((current) => [...current, { role: 'tutor', text: errorMessage }])
     } finally {
