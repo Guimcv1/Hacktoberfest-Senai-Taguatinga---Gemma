@@ -14,7 +14,12 @@ from app.api.routes.documents import router as documents_router
 from app.api.routes.health import router as health_router
 from app.core.config import get_settings
 from app.core.logging_config import configure_logging
-from app.core.middleware import BodySizeLimitMiddleware, RateLimitMiddleware, RequestContextMiddleware
+from app.core.middleware import (
+    BodySizeLimitMiddleware,
+    EmptyJsonBodyMiddleware,
+    RateLimitMiddleware,
+    RequestContextMiddleware,
+)
 from app.db import session as db_session
 from app.db.session import init_db
 from app.services.auth import purge_expired_revocations
@@ -60,6 +65,7 @@ app = FastAPI(
 )
 
 # O último middleware adicionado é o mais externo: CORS envolve inclusive 413, 429 e 500.
+app.add_middleware(EmptyJsonBodyMiddleware)
 app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(RequestContextMiddleware)

@@ -31,15 +31,16 @@ Frontend  --CORS-->  FastAPI
 
 ## Fluxo para o frontend
 
-1. Cadastre/login → guarde `access_token` → envie `Authorization: Bearer <token>`.
-2. **Chat imediato, sem PDF:** `POST /api/chat` com `{"message": "..."}`. A API cria a conversa.
-3. **Continuar a conversa:** envie o `conversation_id` retornado. O histórico vai para o modelo.
-4. **Estudar um PDF (opcional):**
-   - `POST /api/documents` (campo `file`) e depois `POST /api/conversations/{id}/documents` com `{"document_id": "..."}`; ou
-   - `POST /api/documents` com `file` + `conversation_id` (form); ou
-   - incluir `document_id` no `POST /api/chat` (associa aquele PDF à conversa).
-5. Mensagens seguintes usam **apenas** os PDFs associados àquela conversa. Outros arquivos do usuário não entram no contexto.
-6. Não use a URL do Ollama no browser. Configure `CORS_ORIGINS`.
+Não há dependência circular: conversa e PDF são independentes.
+
+1. Cadastre/login → guarde `access_token` → `Authorization: Bearer <token>`.
+2. **Criar conversa sem PDF:** `POST /api/conversations` com `{}`, `null` ou **sem corpo**. Não envie `document_id`.
+3. **Perguntar sem PDF:** `POST /api/chat` `{"conversation_id": "<id>", "message": "..."}`. Também vale omitir `conversation_id` e deixar a API criar a conversa.
+4. **Upload opcional, sem conversa:** `POST /api/documents` só com o campo `file`. **Não envie `conversation_id`.** O PDF fica persistido (texto extraído) e não cria conversa.
+5. **Associar depois:** `POST /api/conversations/{id}/documents` `{"document_id": "<id>"}`.
+6. **Perguntar de novo** no mesmo `conversation_id`: a recuperação usa só os PDFs dessa conversa.
+7. Atalhos compatíveis (não obrigatórios): `document_id` no chat, ou `conversation_id` no form do upload, se a conversa já existir e for do mesmo usuário.
+8. Não use a URL do Ollama no browser. Configure `CORS_ORIGINS`.
 
 ### Mudança de contrato
 

@@ -1,6 +1,18 @@
 from app.main import app
 
 
+def test_openapi_does_not_require_document_or_conversation_to_start() -> None:
+    schema = app.openapi()
+    create = schema["components"]["schemas"]["ConversationCreate"]
+    chat = schema["components"]["schemas"]["ChatRequest"]
+    upload = schema["components"]["schemas"]["Body_upload_document_api_documents_post"]
+
+    assert "document_id" not in create.get("required", [])
+    assert chat.get("required") == ["message"]
+    assert upload.get("required") == ["file"]
+    assert schema["paths"]["/api/conversations"]["post"].get("requestBody", {}).get("required") is not True
+
+
 def test_app_initializes() -> None:
     assert app.title == "StudyBuddy AI"
     schema = app.openapi()

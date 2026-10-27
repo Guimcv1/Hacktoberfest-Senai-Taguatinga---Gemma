@@ -3,21 +3,22 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.ids import optional_id, optional_id_field
+
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, description="Pergunta do estudante.")
-    conversation_id: str | None = Field(default=None, description="Conversa existente; se omitido, uma nova é criada.")
-    document_id: str | None = Field(
-        default=None,
-        description="PDF opcional a associar nesta mensagem. Sem ele, a IA usa o histórico e os PDFs já anexados.",
+    conversation_id: str | None = optional_id_field(
+        "Conversa existente; se omitido, uma nova é criada. Não é obrigatório ter PDF."
+    )
+    document_id: str | None = optional_id_field(
+        "PDF opcional a associar nesta mensagem. Sem ele, a IA usa o histórico e os PDFs já anexados."
     )
 
     @field_validator("document_id", "conversation_id", mode="before")
     @classmethod
     def blank_as_none(cls, value: object) -> object:
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
+        return optional_id(value)
 
 
 class ChatSource(BaseModel):
@@ -40,15 +41,13 @@ class ChatResponse(BaseModel):
 
 
 class ConversationCreate(BaseModel):
-    document_id: str | None = Field(default=None, description="PDF opcional para já associar à conversa.")
-    title: str | None = Field(default=None, max_length=200)
+    document_id: str | None = optional_id_field("PDF opcional. Omita para criar a conversa sem material.")
+    title: str | None = Field(default=None, max_length=200, json_schema_extra={"default": None})
 
     @field_validator("document_id", mode="before")
     @classmethod
     def blank_as_none(cls, value: object) -> object:
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
+        return optional_id(value)
 
 
 class ConversationDocumentAttach(BaseModel):

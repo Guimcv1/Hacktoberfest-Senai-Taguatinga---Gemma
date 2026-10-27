@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import Annotated
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user
@@ -70,9 +72,15 @@ def _messages(row) -> list[ConversationMessage]:
     return items
 
 
-@router.post("", response_model=ConversationSummary, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=ConversationSummary,
+    status_code=status.HTTP_201_CREATED,
+    summary="Criar conversa",
+    description="Cria uma conversa vazia. document_id é opcional; o corpo JSON pode ser omitido ou {}.",
+)
 def start_conversation(
-    payload: ConversationCreate | None = None,
+    payload: Annotated[ConversationCreate | None, Body()] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ConversationSummary:

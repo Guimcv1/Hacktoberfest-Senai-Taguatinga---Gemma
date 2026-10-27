@@ -75,6 +75,55 @@ class RequestContextMiddleware:
             request_id_var.reset(token)
 
 
+class EmptyJsonBodyMiddleware:
+    """POST /api/conversations sem corpo (ou null) vira {}, para criar conversa sem PDF."""
+
+    _PATH = "/api/conversations"
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("method") != "POST":
+            await self.app(scope, receive, send)
+            return
+        if scope.get("path", "").rstrip("/") != self._PATH:
+            await self.app(scope, receive, send)
+            return
+
+        chunks: list[bytes] = []
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                await self.app(scope, receive, send)
+                return
+            chunks.append(message.get("body", b""))
+            if not message.get("more_body"):
+                break
+        body = b"".join(chunks).strip()
+        if not body or body in {b"null", b"undefined", b"none"}:
+            body = b"{}"
+            headers = [
+                (key, value)
+                for key, value in scope.get("headers", [])
+                if key not in {b"content-type", b"content-length"}
+            ]
+            headers.append((b"content-type", b"application/json"))
+            headers.append((b"content-length", str(len(body)).encode()))
+            scope["headers"] = headers
+
+        sent = False
+
+        async def replay() -> Message:
+            nonlocal sent
+            if sent:
+                return {"type": "http.request", "body": b"", "more_body": False}
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        await self.app(scope, replay, send)
+
+
 class BodySizeLimitMiddleware:
     """Recusa corpos grandes antes de autenticar ou interpretar a requisição."""
 

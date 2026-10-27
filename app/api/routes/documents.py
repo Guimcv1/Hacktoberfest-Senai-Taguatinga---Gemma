@@ -31,6 +31,7 @@ from app.services.document_repo import (
     pages_from_json,
     save_document,
 )
+from app.schemas.ids import optional_id
 from app.services.conversations import ConversationNotFoundError, attach_document
 from app.services.documents import (
     DocumentProcessingError,
@@ -72,7 +73,11 @@ def _meta(row) -> DocumentMeta:
 )
 def upload_document(
     file: UploadFile = File(..., description="Arquivo PDF enviado no campo file."),
-    conversation_id: str | None = Form(default=None, description="Conversa existente para anexar este PDF."),
+    conversation_id: str | None = Form(
+        default=None,
+        description="Opcional. Conversa já criada à qual anexar este PDF. Sem este campo o arquivo só é armazenado.",
+        json_schema_extra={"default": None},
+    ),
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -105,6 +110,7 @@ def upload_document(
         raise HTTPException(status_code=status.HTTP_507_INSUFFICIENT_STORAGE, detail=exc.message) from None
 
     attached_conversation_id = None
+    conversation_id = optional_id(conversation_id)
     if conversation_id:
         try:
             attach_document(
