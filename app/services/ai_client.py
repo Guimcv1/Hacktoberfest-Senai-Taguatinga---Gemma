@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from app.core.config import get_settings
+from app.core.config import DEFAULT_OLLAMA_KEEP_ALIVE, get_settings
 
 logger = logging.getLogger("studybuddy")
 
@@ -71,11 +71,13 @@ class AIClient:
         timeout_seconds: float,
         model: str,
         *,
+        keep_alive: str = DEFAULT_OLLAMA_KEEP_ALIVE,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._model = model
+        self._keep_alive = keep_alive
         self._transport = transport
 
     @property
@@ -89,6 +91,10 @@ class AIClient:
     @property
     def model(self) -> str:
         return self._model
+
+    @property
+    def keep_alive(self) -> str:
+        return self._keep_alive
 
     def is_configured(self) -> bool:
         return bool(self._base_url)
@@ -126,6 +132,9 @@ class AIClient:
                 {"role": "user", "content": build_user_prompt(question, context, has_relevant_match)},
             ],
             "stream": False,
+            # keep_alive é do Ollama: após este intervalo sem novas chamadas, o modelo sai da RAM.
+            # O temporizador recomeça a cada POST /api/chat bem-sucedido; o processo do Ollama continua.
+            "keep_alive": keep_alive_json_value(self._keep_alive),
         }
 
         timeout = httpx.Timeout(self._timeout_seconds, connect=min(10.0, self._timeout_seconds))
@@ -194,10 +203,18 @@ def build_user_prompt(question: str, context: str, has_relevant_match: bool = Tr
     )
 
 
+def keep_alive_json_value(keep_alive: str) -> str | int:
+    """0 e -1 vão como número JSON; o restante é duração Go (ex.: 120s)."""
+    if keep_alive in {"-1", "0"}:
+        return int(keep_alive)
+    return keep_alive
+
+
 def get_ai_client() -> AIClient:
     current = get_settings()
     return AIClient(
         base_url=current.ai_base_url,
         timeout_seconds=current.ai_timeout_seconds,
         model=current.ai_model,
+        keep_alive=current.ollama_keep_alive,
     )

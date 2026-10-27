@@ -1,9 +1,13 @@
 import asyncio
+import inspect
 import json
+from pathlib import Path
 
 import httpx
 import pytest
 
+from app.core.config import DEFAULT_OLLAMA_KEEP_ALIVE, get_settings
+from app.services import ai_client as ai_client_module
 from app.services.ai_client import (
     MATERIAL_END,
     MATERIAL_START,
@@ -13,6 +17,8 @@ from app.services.ai_client import (
     AIInvalidResponseError,
     AITimeoutError,
     AIUnavailableError,
+    get_ai_client,
+    keep_alive_json_value,
 )
 
 
@@ -47,6 +53,7 @@ def test_ai_client_sends_confirmed_payload() -> None:
     assert recorded["url"] == "http://ai.test/api/chat"
     assert recorded["payload"]["model"] == "gemma3:4b"
     assert recorded["payload"]["stream"] is False
+    assert recorded["payload"]["keep_alive"] == "120s"
     assert recorded["payload"]["messages"][0]["role"] == "system"
     assert recorded["payload"]["messages"][1]["role"] == "user"
     assert "O que e mitose?" in recorded["payload"]["messages"][1]["content"]
@@ -207,3 +214,90 @@ def test_gateway_timeouts_are_reported_as_timeouts(status_code: int) -> None:
 
     with pytest.raises(AITimeoutError):
         asyncio.run(client.generate_explanation(question="q", context="c"))
+
+
+def test_default_keep_alive_is_two_minutes() -> None:
+    assert DEFAULT_OLLAMA_KEEP_ALIVE == "120s"
+    assert AIClient("http://ai.test", 5.0, "gemma3:4b").keep_alive == "120s"
+    assert get_ai_client().keep_alive == "120s"
+
+
+def test_factory_passes_keep_alive_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLLAMA_KEEP_ALIVE", "2m")
+    get_settings.cache_clear()
+    try:
+        assert get_ai_client().keep_alive == "2m"
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [("120s", "120s"), ("2m", "2m"), ("0", 0), ("-1", -1)],
+)
+def test_keep_alive_is_serialized_for_the_ollama_chat_body(configured: str, expected: str | int) -> None:
+    assert keep_alive_json_value(configured) == expected
+    recorded: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        recorded.append(request)
+        return httpx.Response(200, json=VALID_RESPONSE)
+
+    client = AIClient(
+        "http://ai.test",
+        5.0,
+        "gemma3:4b",
+        keep_alive=configured,
+        transport=httpx.MockTransport(handler),
+    )
+    asyncio.run(client.generate_explanation(question="q", context="c"))
+
+    payload = json.loads(recorded[0].content)
+    assert recorded[0].url.path == "/api/chat"
+    assert payload["keep_alive"] == expected
+    assert payload["model"] == "gemma3:4b"
+    assert payload["stream"] is False
+    assert "messages" in payload
+
+
+def test_ping_does_not_send_keep_alive_or_load_the_model() -> None:
+    recorded: list[httpx.Request] = []
+    client = _recording_client(recorded, httpx.Response(200, text="Ollama is running"))
+
+    asyncio.run(client.ping())
+
+    assert recorded[0].method == "GET"
+    assert recorded[0].content == b""
+    assert b"keep_alive" not in recorded[0].content
+
+
+def test_concurrent_explanations_complete_without_cancelling_each_other() -> None:
+    payloads: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json=VALID_RESPONSE)
+
+    client = AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(handler))
+
+    async def run_pair():
+        return await asyncio.gather(
+            client.generate_explanation(question="uma", context="a"),
+            client.generate_explanation(question="duas", context="b"),
+        )
+
+    results = asyncio.run(run_pair())
+
+    assert [item.content for item in results] == ["Texto gerado pelo modelo", "Texto gerado pelo modelo"]
+    assert {payload["messages"][1]["content"].splitlines()[1] for payload in payloads} == {"uma", "duas"}
+    assert [payload["keep_alive"] for payload in payloads] == ["120s", "120s"]
+
+
+def test_ai_client_does_not_stop_the_ollama_process() -> None:
+    source = Path(ai_client_module.__file__).read_text(encoding="utf-8")
+    class_source = inspect.getsource(AIClient)
+    forbidden = ("os.kill", "signal.SIGTERM", "terminate(", "pkill", "taskkill", "kill -9", "/api/stop")
+    for token in forbidden:
+        assert token not in source
+        assert token not in class_source
+    assert "keep_alive" in class_source

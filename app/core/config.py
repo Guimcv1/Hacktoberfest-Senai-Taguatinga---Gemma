@@ -1,4 +1,5 @@
 import os
+import re
 from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlsplit
@@ -7,6 +8,9 @@ from pydantic import Field, SecretStr, ValidationError, field_validator, model_v
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_DATABASE_URL = "sqlite:///./data/studybuddy.db"
+DEFAULT_OLLAMA_KEEP_ALIVE = "120s"
+# Durações aceitas pelo UnmarshalJSON do Ollama (time.ParseDuration).
+_OLLAMA_DURATION = re.compile(r"^(?:\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m|h))+$")
 
 # Valores que já foram publicados no repositório e nunca podem assinar tokens reais.
 _PUBLIC_PLACEHOLDER_SECRETS = {
@@ -39,6 +43,10 @@ class Settings(BaseSettings):
     ai_base_url: str = ""
     ai_model: str = "gemma3:4b"
     ai_timeout_seconds: float = Field(default=120.0, gt=0)
+    ollama_keep_alive: str = Field(
+        default=DEFAULT_OLLAMA_KEEP_ALIVE,
+        description="Quanto tempo o Ollama mantém o modelo na memória após a última resposta.",
+    )
     database_url: str = DEFAULT_DATABASE_URL
     db_auto_migrate: bool = True
     jwt_secret: SecretStr
@@ -87,6 +95,28 @@ class Settings(BaseSettings):
         if secret.lower() in _PUBLIC_PLACEHOLDER_SECRETS:
             raise ValueError("o valor é um exemplo público; gere um segredo novo.")
         return value
+
+    @field_validator("ollama_keep_alive", mode="before")
+    @classmethod
+    def validate_ollama_keep_alive(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("use uma duração do Ollama, por exemplo 120s, 2m, 0 ou -1.")
+        if isinstance(value, (int, float)):
+            if value in {-1, 0}:
+                return str(int(value))
+            if value > 0 and float(value) == int(value):
+                return f"{int(value)}s"
+            raise ValueError("use uma duração do Ollama, por exemplo 120s, 2m, 0 ou -1.")
+        if not isinstance(value, str):
+            return value
+        value = value.strip()
+        if value in {"-1", "0"}:
+            return value
+        if value.isdigit() and int(value) > 0:
+            return f"{int(value)}s"
+        if _OLLAMA_DURATION.fullmatch(value):
+            return value
+        raise ValueError("use uma duração do Ollama, por exemplo 120s, 2m, 0 ou -1.")
 
     @field_validator("ai_base_url")
     @classmethod

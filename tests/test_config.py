@@ -1,6 +1,12 @@
 import pytest
 
-from app.core.config import ConfigurationError, Settings, get_database_url, get_settings
+from app.core.config import (
+    DEFAULT_OLLAMA_KEEP_ALIVE,
+    ConfigurationError,
+    Settings,
+    get_database_url,
+    get_settings,
+)
 
 VALID_SECRET = "a-valid-random-secret-with-more-than-32-chars"
 
@@ -69,6 +75,35 @@ def test_environment_is_normalized_and_validated() -> None:
     assert _settings(environment=" Production ").environment == "production"
     with pytest.raises(ValueError):
         _settings(environment="prod")
+
+
+def test_ollama_keep_alive_defaults_to_two_minutes() -> None:
+    assert DEFAULT_OLLAMA_KEEP_ALIVE == "120s"
+    assert _settings().ollama_keep_alive == "120s"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("120s", "120s"), ("2m", "2m"), ("0", "0"), ("-1", "-1"), (120, "120s"), ("90", "90s")],
+)
+def test_ollama_keep_alive_accepts_ollama_durations(raw: object, expected: str) -> None:
+    assert _settings(ollama_keep_alive=raw).ollama_keep_alive == expected
+
+
+@pytest.mark.parametrize("invalid", ["", "forever", "-5s", True, -2, 1.5])
+def test_ollama_keep_alive_rejects_invalid_values(invalid: object) -> None:
+    with pytest.raises(ValueError):
+        _settings(ollama_keep_alive=invalid)
+
+
+def test_jwt_secret_remains_required_when_keep_alive_is_set(fresh_settings: pytest.MonkeyPatch) -> None:
+    fresh_settings.delenv("JWT_SECRET", raising=False)
+    fresh_settings.setenv("OLLAMA_KEEP_ALIVE", "120s")
+
+    with pytest.raises(ConfigurationError) as exc_info:
+        get_settings()
+
+    assert "JWT_SECRET" in str(exc_info.value)
 
 
 def test_ai_base_url_requires_scheme_and_drops_trailing_slash() -> None:

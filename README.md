@@ -22,6 +22,8 @@ Frontend  --CORS-->  FastAPI
                       └─ AIClient --> Ollama / Gemma 3:4b
 ```
 
+- O backend não guarda um agente em memória por usuário. Cada pergunta é um `POST {AI_BASE_URL}/api/chat` sem sessão no Ollama.
+- O Ollama descarrega o modelo da RAM após **120 segundos** sem novas chamadas (`OLLAMA_KEEP_ALIVE=120s`). O processo do Ollama continua no ar; conversas e documentos no banco não são apagados.
 - Documentos, conversas e usuários são **isolados por conta**.
 - Persistência padrão: SQLite em `data/studybuddy.db` (sobrevive a restart).
 - PostgreSQL é opcional via `DATABASE_URL`.
@@ -110,6 +112,19 @@ uvicorn app.main:app --reload
 ```
 
 Swagger: `http://127.0.0.1:8000/docs`
+
+## Ollama e memória do modelo
+
+O cliente de IA envia `keep_alive` no corpo de cada `POST /api/chat` (contrato do Ollama). Padrão: `120s`.
+
+| Variável | Função |
+| --- | --- |
+| `AI_BASE_URL` | URL do Ollama, só no backend |
+| `AI_MODEL` | `gemma3:4b` |
+| `AI_TIMEOUT_SECONDS` | timeout HTTP da inferência |
+| `OLLAMA_KEEP_ALIVE` | quanto tempo o modelo fica carregado após a última resposta (`120s`, `2m`, `0` ou `-1`) |
+
+O temporizador é do próprio Ollama: uma nova pergunta válida o reinicia; requisições ainda em andamento não são canceladas. Se o modelo já tiver saído da memória, a próxima pergunta o recarrega (pode demorar mais). Isso não encerra o servidor Ollama e não apaga histórico persistido.
 
 ## Banco
 

@@ -16,6 +16,30 @@ def _upload(client: TestClient, auth_headers: dict[str, str]) -> str:
     return response.json()["document_id"]
 
 
+def test_conversation_history_survives_model_keep_alive_expiry(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """O keep_alive descarrega o Gemma no Ollama; o histórico fica no banco da API."""
+    app.dependency_overrides[get_ai_client] = lambda: FakeAIClient("Explicacao persistida")
+    document_id = _upload(client, auth_headers)
+    conversation_id = client.post(
+        "/api/chat",
+        headers=auth_headers,
+        json={"document_id": document_id, "message": "Explique a mitose"},
+    ).json()["conversation_id"]
+
+    # Simula o fim do keep_alive: um cliente novo, sem estado de modelo na API.
+    app.dependency_overrides[get_ai_client] = lambda: FakeAIClient("Ainda no historico")
+
+    detail = client.get(f"/api/conversations/{conversation_id}", headers=auth_headers)
+    listed = client.get("/api/conversations", headers=auth_headers)
+
+    assert detail.status_code == 200
+    assert [message["role"] for message in detail.json()["messages"]] == ["user", "assistant"]
+    assert listed.json()["total"] == 1
+    assert listed.json()["items"][0]["id"] == conversation_id
+
+
 def test_conversation_history_persists(client: TestClient, auth_headers: dict[str, str]) -> None:
     app.dependency_overrides[get_ai_client] = lambda: FakeAIClient("Explicacao persistida")
     document_id = _upload(client, auth_headers)
