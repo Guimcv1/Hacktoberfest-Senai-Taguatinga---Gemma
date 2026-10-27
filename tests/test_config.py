@@ -1,6 +1,7 @@
 import pytest
 
 from app.core.config import (
+    DEFAULT_AI_MODEL,
     DEFAULT_OLLAMA_KEEP_ALIVE,
     ConfigurationError,
     Settings,
@@ -75,6 +76,22 @@ def test_environment_is_normalized_and_validated() -> None:
     assert _settings(environment=" Production ").environment == "production"
     with pytest.raises(ValueError):
         _settings(environment="prod")
+
+
+def test_default_ai_model_is_official_gemma4_e4b() -> None:
+    assert DEFAULT_AI_MODEL == "gemma4:e4b"
+    assert _settings().ai_model == "gemma4:e4b"
+
+
+def test_ai_model_can_be_overridden(fresh_settings: pytest.MonkeyPatch) -> None:
+    fresh_settings.setenv("JWT_SECRET", VALID_SECRET)
+    fresh_settings.setenv("AI_MODEL", "gemma4:e4b-it-q8_0")
+    assert get_settings().ai_model == "gemma4:e4b-it-q8_0"
+
+
+def test_blank_ai_model_is_rejected() -> None:
+    with pytest.raises(ValueError):
+        _settings(ai_model="  ")
 
 
 def test_ollama_keep_alive_defaults_to_two_minutes() -> None:

@@ -22,7 +22,7 @@ def _upload(client: TestClient, pages: list[str], auth_headers: dict[str, str], 
 
 
 def _enable_fake_ai(content: str = "Resposta mockada do professor") -> FakeAIClient:
-    fake = FakeAIClient(content=content, model="gemma3:4b")
+    fake = FakeAIClient(content=content)
     app.dependency_overrides[get_ai_client] = lambda: fake
     return fake
 
@@ -62,7 +62,7 @@ def test_chat_with_valid_document_returns_mocked_answer(client: TestClient, auth
     payload = response.json()
     assert payload["document_id"] == uploaded["document_id"]
     assert payload["answer"] == "Mitose e o processo de divisao celular."
-    assert payload["model"] == "gemma3:4b"
+    assert payload["model"] == "gemma4:e4b"
     assert payload["status"] == "completed"
     assert payload["sources"][0]["page"] == 2
     assert "mitose" in payload["sources"][0]["excerpt"].lower()

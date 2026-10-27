@@ -9,6 +9,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_DATABASE_URL = "sqlite:///./data/studybuddy.db"
 DEFAULT_OLLAMA_KEEP_ALIVE = "120s"
+# Tag oficial na biblioteca do Ollama: https://ollama.com/library/gemma4:e4b
+DEFAULT_AI_MODEL = "gemma4:e4b"
 # Durações aceitas pelo UnmarshalJSON do Ollama (time.ParseDuration).
 _OLLAMA_DURATION = re.compile(r"^(?:\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m|h))+$")
 
@@ -41,7 +43,7 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     ai_base_url: str = ""
-    ai_model: str = "gemma3:4b"
+    ai_model: str = DEFAULT_AI_MODEL
     ai_timeout_seconds: float = Field(default=120.0, gt=0)
     ollama_keep_alive: str = Field(
         default=DEFAULT_OLLAMA_KEEP_ALIVE,
@@ -117,6 +119,16 @@ class Settings(BaseSettings):
         if _OLLAMA_DURATION.fullmatch(value):
             return value
         raise ValueError("use uma duração do Ollama, por exemplo 120s, 2m, 0 ou -1.")
+
+    @field_validator("ai_model", mode="before")
+    @classmethod
+    def validate_ai_model(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        value = value.strip()
+        if not value:
+            raise ValueError("defina a tag do modelo no Ollama, por exemplo gemma4:e4b.")
+        return value
 
     @field_validator("ai_base_url")
     @classmethod

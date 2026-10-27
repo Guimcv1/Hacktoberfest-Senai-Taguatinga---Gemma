@@ -33,6 +33,7 @@ from app.services.ai_client import (
     AIInvalidResponseError,
     _neutralize_markers,
 )
+from app.services.ai_runtime import get_inference_gate
 from app.services.conversations import associated_documents, get_owned_conversation, history_for_model
 from app.services.study_context import document_context
 
@@ -120,15 +121,16 @@ async def generate_question_set(
     messages = _build_messages(payload, history, context, has_match=has_match, has_material=bool(documents))
     db.commit()
 
-    explanation = await ai_client.generate_completion(messages=messages, json_mode=True)
-    questions = _parse_questions(explanation.content, payload)
-    if questions is None:
-        logger.warning("JSON de questões inválido; tentando uma correção.")
-        explanation = await ai_client.generate_completion(
-            messages=_repair_messages(explanation.content),
-            json_mode=True,
-        )
+    async with get_inference_gate().inference():
+        explanation = await ai_client.generate_completion(messages=messages, json_mode=True)
         questions = _parse_questions(explanation.content, payload)
+        if questions is None:
+            logger.warning("JSON de questões inválido; tentando uma correção.")
+            explanation = await ai_client.generate_completion(
+                messages=_repair_messages(explanation.content),
+                json_mode=True,
+            )
+            questions = _parse_questions(explanation.content, payload)
     if questions is None:
         raise AIInvalidResponseError()
 

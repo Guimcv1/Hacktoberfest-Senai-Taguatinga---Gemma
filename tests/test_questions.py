@@ -407,7 +407,7 @@ def test_question_generation_respects_context_limit_and_keep_alive_contract(
     assert old not in history_contents
     assert any(recent in content for content in history_contents)
     assert fake.last_completion["json_mode"] is True
-    assert response.json()["model"] == "gemma3:4b"
+    assert response.json()["model"] == "gemma4:e4b"
 
 
 def test_blank_observation_is_treated_as_absent(client: TestClient, auth_headers: dict[str, str]) -> None:

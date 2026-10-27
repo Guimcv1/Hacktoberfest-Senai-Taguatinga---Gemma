@@ -10,7 +10,7 @@ Esta branch (`backend`) contém a API Python do **StudyBuddy AI**.
 
 # StudyBuddy AI — Backend
 
-API do professor virtual: o estudante autentica e conversa com **Gemma 3:4b via Ollama**. O PDF é **opcional** — só precisa ser enviado quando a pergunta deve se apoiar naquele material. A URL da IA fica só no servidor.
+API do professor virtual: o estudante autentica e conversa com **Gemma 4 E4B (`gemma4:e4b`) via Ollama**. O PDF é **opcional** — só precisa ser enviado quando a pergunta deve se apoiar naquele material. A URL da IA fica só no servidor.
 
 ## Arquitetura
 
@@ -19,12 +19,12 @@ Frontend  --CORS-->  FastAPI
                       ├─ JWT (cadastro/login/logout)
                       ├─ SQLite (dev) ou PostgreSQL
                       ├─ extração PyMuPDF + retrieval lexical (só PDFs da conversa)
-                      └─ AIClient --> Ollama / Gemma 3:4b
+                      └─ AIClient --> Ollama / Gemma 4 E4B (`gemma4:e4b`)
 ```
 
 - Não há um agente em memória por usuário. Cada pergunta é um `POST {AI_BASE_URL}/api/chat`.
 - O histórico da conversa é persistido no banco e reenviado ao Gemma nas próximas mensagens (até `MAX_CONTEXT_CHARS`).
-- O Ollama descarrega o modelo da RAM após **120 segundos** sem novas chamadas (`OLLAMA_KEEP_ALIVE=120s`).
+- O Ollama descarrega o modelo da RAM após **120 segundos** sem novas chamadas (`OLLAMA_KEEP_ALIVE=120s`). Também há unload manual autenticado (`POST /api/ai/unload`).
 - Documentos, conversas e usuários são **isolados por conta**.
 - OCR **não** está implementado. PDF só com imagem é rejeitado.
 - Tokens JWT de acesso (8 h por padrão), com logout por denylist. **Não há refresh token**.
@@ -73,6 +73,7 @@ Clientes antigos que ainda enviam `document_id` no chat continuam funcionando.
 | GET | `/api/documents/{id}` | sim | metadados + páginas |
 | DELETE | `/api/documents/{id}` | sim | exclusão (a conversa permanece) |
 | POST | `/api/chat` | sim | pergunta (cria conversa se omitido `conversation_id`) |
+| POST | `/api/ai/unload` | sim | descarrega o modelo da memória do Ollama (`keep_alive: 0`) |
 | POST | `/api/conversations` | sim | cria conversa, com ou sem PDF |
 | GET | `/api/conversations` | sim | listagem |
 | GET | `/api/conversations/{id}` | sim | histórico |
@@ -109,7 +110,7 @@ Resposta:
   "document_ids": ["uuid"],
   "answer": "Explicação",
   "sources": [{"page": 2, "excerpt": "trecho real", "document_id": "uuid", "filename": "aula.pdf"}],
-  "model": "gemma3:4b",
+  "model": "gemma4:e4b",
   "status": "completed",
   "has_relevant_match": true,
   "used_documents": true
@@ -171,7 +172,7 @@ Resposta:
   "used_documents": true,
   "has_relevant_match": true,
   "sources": [{"page": 2, "excerpt": "trecho real", "document_id": "uuid", "filename": "aula.pdf"}],
-  "model": "gemma3:4b",
+  "model": "gemma4:e4b",
   "created_at": "2026-10-27T12:00:00Z"
 }
 ```
@@ -206,11 +207,45 @@ Os conjuntos ficam na tabela `question_sets`, ligados à conversa e ao usuário.
 
 O cliente envia `keep_alive` em cada `POST /api/chat` ao Ollama (chat e geração de questões). Padrão: `120s`. A geração pede `format: json` nesse mesmo contrato.
 
+A tag padrão é **`gemma4:e4b`**, a variante E4B da biblioteca oficial do Ollama (`gemma4:latest` é um alias; `gemma4` sem tag e `gemma3:4b` **não** são equivalentes). Instale no host do Ollama:
+
+```bash
+ollama pull gemma4:e4b
+```
+
+A API **não** baixa nem instala o modelo na inicialização. Se `AI_MODEL` apontar para uma tag que o Ollama ainda não tem, as inferências falham com 503.
+
+### Descarregar o modelo (`POST /api/ai/unload`)
+
+Pedido autenticado, sem corpo. A API envia ao Ollama:
+
+```json
+{ "model": "gemma4:e4b", "prompt": "", "stream": false, "keep_alive": 0 }
+```
+
+em `POST {AI_BASE_URL}/api/generate`. Não usa `ollama rm`, `/api/delete`, `/api/pull` nem `/api/stop`.
+
+Resposta `200`:
+
+```json
+{
+  "status": "unloaded",
+  "model": "gemma4:e4b",
+  "message": "O Ollama aceitou o pedido para descarregar o modelo da memória. A próxima pergunta pode carregá-lo de novo. Isso não apaga o modelo nem mede a RAM ou a VRAM liberada."
+}
+```
+
+- `409` se já houver inferência (chat ou questões) em andamento neste processo.
+- `503` se o Ollama não responder, estourar timeout ou recusar o unload. O backend **não** trata erro do Ollama como sucesso.
+- Durante o unload, novas inferências neste processo recebem `503`.
+- O cadeado é **por processo**. Vários workers Uvicorn ou várias instâncias da API não compartilham esse estado: descarregue só com um worker, ou quando não houver carga. Não medimos RAM/VRAM física.
+- A próxima pergunta recarrega o modelo normalmente (o Ollama faz o load sob demanda).
+
 | Variável | Função |
 | --- | --- |
 | `AI_BASE_URL` | URL do Ollama, só no backend |
-| `AI_MODEL` | `gemma3:4b` |
-| `AI_TIMEOUT_SECONDS` | timeout HTTP da inferência |
+| `AI_MODEL` | `gemma4:e4b` (configurável) |
+| `AI_TIMEOUT_SECONDS` | timeout HTTP da inferência (padrão 120; a primeira carga após unload pode chegar perto desse limite) |
 | `OLLAMA_KEEP_ALIVE` | quanto tempo o modelo fica carregado (`120s`, `2m`, `0` ou `-1`) |
 
 ## Instalação
@@ -222,7 +257,8 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env
-# edite JWT_SECRET em .env
+# edite JWT_SECRET e, se o Ollama estiver em outro host, AI_BASE_URL
+# no host do Ollama: ollama pull gemma4:e4b
 uvicorn app.main:app --reload
 ```
 
@@ -233,6 +269,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+# ollama pull gemma4:e4b
 uvicorn app.main:app --reload
 ```
 
@@ -267,5 +304,6 @@ A suíte usa SQLite em memória e **mock da IA**. Não depende do túnel.
 - Rate limit em memória por processo; não compartilha entre workers.
 - JWT sem refresh; logout só invalida o `jti` apresentado.
 - O histórico enviado ao modelo é truncado por `MAX_CONTEXT_CHARS`; mensagens antigas podem ficar de fora do prompt, mas permanecem no banco.
-- A qualidade pedagógica das questões depende do Gemma 3:4b; a suíte de testes usa mock da IA e não valida o modelo real.
+- A qualidade pedagógica das questões depende do Gemma 4 E4B; a suíte de testes usa mock da IA e não valida o modelo real.
+- O unload manual só coordena inferências **neste processo**. Com vários workers, um unload pode coincidir com uma inferência em outro worker.
 - Só há múltipla escolha (A–D) nesta versão; outros tipos de questão ainda não estão implementados.

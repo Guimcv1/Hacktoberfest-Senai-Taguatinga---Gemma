@@ -13,6 +13,7 @@ from app.db.models import User
 from app.db.session import get_db
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.ai_client import AIClient, AIClientError, AIInvalidResponseError, get_ai_client
+from app.services.ai_runtime import get_inference_gate
 from app.services.conversations import (
     ConversationNotFoundError,
     add_turn,
@@ -74,13 +75,14 @@ async def chat(
     db.commit()
 
     try:
-        explanation = await ai_client.generate_explanation(
-            question=message,
-            context=context,
-            history=history,
-            has_relevant_match=has_match,
-            has_material=bool(documents),
-        )
+        async with get_inference_gate().inference():
+            explanation = await ai_client.generate_explanation(
+                question=message,
+                context=context,
+                history=history,
+                has_relevant_match=has_match,
+                has_material=bool(documents),
+            )
     except AIClientError as exc:
         logger.warning("Falha ao consultar a IA: tipo=%s", type(exc).__name__)
         status_code = (

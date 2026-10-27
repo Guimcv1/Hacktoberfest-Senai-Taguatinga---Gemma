@@ -28,6 +28,7 @@ from app.db.base import Base  # noqa: E402
 from app.db.migrations import upgrade_database  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.ai_client import get_ai_client  # noqa: E402
+from app.services.ai_runtime import get_inference_gate  # noqa: E402
 from tests.helpers import register_and_login  # noqa: E402
 
 if "test" not in (make_url(os.environ["DATABASE_URL"]).database or "test"):
@@ -55,6 +56,9 @@ class _BlockedAIClient:
     async def generate_completion(self, **kwargs):
         raise AssertionError("Os testes não devem chamar o serviço real de IA.")
 
+    async def unload(self, **kwargs):
+        raise AssertionError("Os testes não devem chamar o serviço real de IA.")
+
     async def ping(self, **kwargs):
         raise AssertionError("Os testes não devem chamar o serviço real de IA.")
 
@@ -62,9 +66,11 @@ class _BlockedAIClient:
 @pytest.fixture(autouse=True)
 def reset_runtime_state() -> Iterator[None]:
     _clear_tables()
+    get_inference_gate().reset()
     app.dependency_overrides.clear()
     app.dependency_overrides[get_ai_client] = lambda: _BlockedAIClient()
     yield
+    get_inference_gate().reset()
     app.dependency_overrides.clear()
 
 

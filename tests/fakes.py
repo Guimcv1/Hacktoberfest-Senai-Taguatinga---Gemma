@@ -1,3 +1,4 @@
+from app.core.config import DEFAULT_AI_MODEL
 from app.services.ai_client import AIExplanation
 
 
@@ -5,8 +6,9 @@ class FakeAIClient:
     def __init__(
         self,
         content: str = "Resposta mockada do professor",
-        model: str = "gemma3:4b",
+        model: str = DEFAULT_AI_MODEL,
         completions: list[str | BaseException] | None = None,
+        unload_error: BaseException | None = None,
     ) -> None:
         self.content = content
         self.model = model
@@ -14,7 +16,9 @@ class FakeAIClient:
         self.last_completion: dict | None = None
         self.calls = 0
         self.completion_calls = 0
+        self.unload_calls = 0
         self._completions = list(completions) if completions is not None else None
+        self._unload_error = unload_error
 
     async def generate_explanation(
         self,
@@ -52,3 +56,8 @@ class FakeAIClient:
                 raise item
             return AIExplanation(content=item, model=self.model)
         return AIExplanation(content=self.content, model=self.model)
+
+    async def unload(self) -> None:
+        self.unload_calls += 1
+        if self._unload_error is not None:
+            raise self._unload_error

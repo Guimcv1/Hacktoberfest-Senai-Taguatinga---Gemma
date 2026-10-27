@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.core.config import DEFAULT_OLLAMA_KEEP_ALIVE, get_settings
+from app.core.config import DEFAULT_AI_MODEL, DEFAULT_OLLAMA_KEEP_ALIVE, get_settings
 from app.services import ai_client as ai_client_module
 from app.services.ai_client import (
     MATERIAL_END,
@@ -23,7 +23,7 @@ from app.services.ai_client import (
 
 
 VALID_RESPONSE = {
-    "model": "gemma3:4b",
+    "model": "gemma4:e4b",
     "message": {"role": "assistant", "content": "Texto gerado pelo modelo"},
     "done": True,
 }
@@ -50,14 +50,14 @@ def test_ai_client_sends_confirmed_payload() -> None:
     client = AIClient(
         "http://ai.test",
         5.0,
-        "gemma3:4b",
+        "gemma4:e4b",
         transport=httpx.MockTransport(handler),
     )
 
     result = _run(client)
 
     assert recorded["url"] == "http://ai.test/api/chat"
-    assert recorded["payload"]["model"] == "gemma3:4b"
+    assert recorded["payload"]["model"] == "gemma4:e4b"
     assert recorded["payload"]["stream"] is False
     assert recorded["payload"]["keep_alive"] == "120s"
     assert "format" not in recorded["payload"]
@@ -66,7 +66,7 @@ def test_ai_client_sends_confirmed_payload() -> None:
     assert "O que e mitose?" in recorded["payload"]["messages"][1]["content"]
     assert "[Página 2]" in recorded["payload"]["messages"][1]["content"]
     assert result.content == "Texto gerado pelo modelo"
-    assert result.model == "gemma3:4b"
+    assert result.model == "gemma4:e4b"
     assert "http://ai.test" not in result.content
 
 
@@ -77,7 +77,7 @@ def test_generate_completion_json_mode_keeps_alive_and_requests_json() -> None:
         recorded.append(json.loads(request.content))
         return httpx.Response(200, json=VALID_RESPONSE)
 
-    client = AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(handler))
+    client = AIClient("http://ai.test", 5.0, "gemma4:e4b", transport=httpx.MockTransport(handler))
     result = asyncio.run(
         client.generate_completion(
             messages=[{"role": "user", "content": "Gere JSON"}],
@@ -95,7 +95,7 @@ def test_ai_client_accepts_valid_ollama_response() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=VALID_RESPONSE)
 
-    client = AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(handler))
+    client = AIClient("http://ai.test", 5.0, "gemma4:e4b", transport=httpx.MockTransport(handler))
     result = _run(client)
     assert result.content == "Texto gerado pelo modelo"
 
@@ -104,7 +104,7 @@ def test_ai_client_timeout() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("slow")
 
-    client = AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(handler))
+    client = AIClient("http://ai.test", 5.0, "gemma4:e4b", transport=httpx.MockTransport(handler))
 
     with pytest.raises(AITimeoutError) as exc_info:
         _run(client)
@@ -117,7 +117,7 @@ def test_ai_client_http_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={"error": "internal"})
 
-    client = AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(handler))
+    client = AIClient("http://ai.test", 5.0, "gemma4:e4b", transport=httpx.MockTransport(handler))
 
     with pytest.raises(AIUnavailableError) as exc_info:
         _run(client)
@@ -131,7 +131,7 @@ def test_ai_client_invalid_json() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text="nao-json")
 
-    client = AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(handler))
+    client = AIClient("http://ai.test", 5.0, "gemma4:e4b", transport=httpx.MockTransport(handler))
 
     with pytest.raises(AIInvalidResponseError):
         _run(client)
@@ -139,9 +139,9 @@ def test_ai_client_invalid_json() -> None:
 
 def test_ai_client_missing_message_content() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"model": "gemma3:4b", "done": True})
+        return httpx.Response(200, json={"model": "gemma4:e4b", "done": True})
 
-    client = AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(handler))
+    client = AIClient("http://ai.test", 5.0, "gemma4:e4b", transport=httpx.MockTransport(handler))
 
     with pytest.raises(AIInvalidResponseError):
         _run(client)
@@ -151,7 +151,7 @@ def test_ai_client_connection_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("offline")
 
-    client = AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(handler))
+    client = AIClient("http://ai.test", 5.0, "gemma4:e4b", transport=httpx.MockTransport(handler))
 
     with pytest.raises(AIUnavailableError):
         _run(client)
@@ -162,7 +162,7 @@ def _recording_client(recorded: list[httpx.Request], response: httpx.Response | 
         recorded.append(request)
         return response or httpx.Response(200, json=VALID_RESPONSE)
 
-    return AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(handler))
+    return AIClient("http://ai.test", 5.0, "gemma4:e4b", transport=httpx.MockTransport(handler))
 
 
 def _user_prompt(request: httpx.Request) -> str:
@@ -235,10 +235,10 @@ def test_ping_fails_when_offline_or_not_configured() -> None:
     def offline(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("offline")
 
-    offline_client = AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(offline))
+    offline_client = AIClient("http://ai.test", 5.0, "gemma4:e4b", transport=httpx.MockTransport(offline))
 
     assert asyncio.run(offline_client.ping()) is False
-    assert asyncio.run(AIClient("", 5.0, "gemma3:4b").ping()) is False
+    assert asyncio.run(AIClient("", 5.0, "gemma4:e4b").ping()) is False
 
 
 @pytest.mark.parametrize("status_code", [504, 524])
@@ -251,7 +251,7 @@ def test_gateway_timeouts_are_reported_as_timeouts(status_code: int) -> None:
 
 def test_default_keep_alive_is_two_minutes() -> None:
     assert DEFAULT_OLLAMA_KEEP_ALIVE == "120s"
-    assert AIClient("http://ai.test", 5.0, "gemma3:4b").keep_alive == "120s"
+    assert AIClient("http://ai.test", 5.0, "gemma4:e4b").keep_alive == "120s"
     assert get_ai_client().keep_alive == "120s"
 
 
@@ -279,7 +279,7 @@ def test_keep_alive_is_serialized_for_the_ollama_chat_body(configured: str, expe
     client = AIClient(
         "http://ai.test",
         5.0,
-        "gemma3:4b",
+        "gemma4:e4b",
         keep_alive=configured,
         transport=httpx.MockTransport(handler),
     )
@@ -288,7 +288,7 @@ def test_keep_alive_is_serialized_for_the_ollama_chat_body(configured: str, expe
     payload = json.loads(recorded[0].content)
     assert recorded[0].url.path == "/api/chat"
     assert payload["keep_alive"] == expected
-    assert payload["model"] == "gemma3:4b"
+    assert payload["model"] == "gemma4:e4b"
     assert payload["stream"] is False
     assert "messages" in payload
 
@@ -311,7 +311,7 @@ def test_concurrent_explanations_complete_without_cancelling_each_other() -> Non
         payloads.append(json.loads(request.content))
         return httpx.Response(200, json=VALID_RESPONSE)
 
-    client = AIClient("http://ai.test", 5.0, "gemma3:4b", transport=httpx.MockTransport(handler))
+    client = AIClient("http://ai.test", 5.0, "gemma4:e4b", transport=httpx.MockTransport(handler))
 
     async def run_pair():
         return await asyncio.gather(
@@ -357,3 +357,66 @@ def test_ai_client_does_not_stop_the_ollama_process() -> None:
         assert token not in source
         assert token not in class_source
     assert "keep_alive" in class_source
+
+
+def test_factory_uses_configured_model_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert DEFAULT_AI_MODEL == "gemma4:e4b"
+    assert get_ai_client().model == "gemma4:e4b"
+    monkeypatch.setenv("AI_MODEL", "gemma4:e4b-it-q8_0")
+    get_settings.cache_clear()
+    try:
+        assert get_ai_client().model == "gemma4:e4b-it-q8_0"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_unload_sends_official_generate_keep_alive_zero() -> None:
+    recorded: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        recorded.append(request)
+        return httpx.Response(
+            200,
+            json={"model": "gemma4:e4b", "response": "", "done": True, "done_reason": "unload"},
+        )
+
+    client = AIClient("http://ai.test", 5.0, "gemma4:e4b", transport=httpx.MockTransport(handler))
+    asyncio.run(client.unload())
+
+    assert recorded[0].url.path == "/api/generate"
+    payload = json.loads(recorded[0].content)
+    assert payload["model"] == "gemma4:e4b"
+    assert payload["keep_alive"] == 0
+    assert payload["prompt"] == ""
+    assert payload["stream"] is False
+    assert recorded[0].url.path != "/api/delete"
+    assert "/api/stop" not in str(recorded[0].url)
+    assert "/api/pull" not in str(recorded[0].url)
+
+
+def test_unload_timeout_and_http_error_are_public() -> None:
+    def timeout_handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("slow")
+
+    def error_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "internal"})
+
+    timeout_client = AIClient("http://ai.test", 5.0, transport=httpx.MockTransport(timeout_handler))
+    error_client = AIClient("http://ai.test", 5.0, transport=httpx.MockTransport(error_handler))
+
+    with pytest.raises(AITimeoutError) as timeout_info:
+        asyncio.run(timeout_client.unload())
+    with pytest.raises(AIUnavailableError) as error_info:
+        asyncio.run(error_client.unload())
+
+    assert "demorou" in timeout_info.value.public_message
+    assert "indisponível" in error_info.value.public_message
+    assert "ai.test" not in timeout_info.value.public_message
+    assert "500" not in error_info.value.public_message
+
+
+def test_unload_does_not_delete_or_pull_the_model() -> None:
+    body = inspect.getsource(AIClient.unload).split('"""', 2)[-1]
+    for token in ("ollama rm", "/api/delete", "/api/pull", "/api/stop", "os.kill"):
+        assert token not in body
+    assert "/api/generate" in body

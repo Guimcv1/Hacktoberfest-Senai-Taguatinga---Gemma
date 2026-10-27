@@ -29,6 +29,8 @@ def test_app_initializes() -> None:
     assert "/api/conversations/{conversation_id}/documents" in schema["paths"]
     assert "/api/conversations/{conversation_id}/questions/generate" in schema["paths"]
     assert "/api/conversations/{conversation_id}/questions" in schema["paths"]
+    assert "/api/ai/unload" in schema["paths"]
+    assert "post" in schema["paths"]["/api/ai/unload"]
     generate = schema["paths"]["/api/conversations/{conversation_id}/questions/generate"]["post"]
     assert generate.get("security")
     request_schema = schema["components"]["schemas"]["GenerateQuestionsRequest"]

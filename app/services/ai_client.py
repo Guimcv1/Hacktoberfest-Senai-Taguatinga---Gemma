@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from app.core.config import DEFAULT_OLLAMA_KEEP_ALIVE, get_settings
+from app.core.config import DEFAULT_AI_MODEL, DEFAULT_OLLAMA_KEEP_ALIVE, get_settings
 
 logger = logging.getLogger("studybuddy")
 
@@ -72,7 +72,7 @@ class AIClient:
         self,
         base_url: str,
         timeout_seconds: float,
-        model: str,
+        model: str = DEFAULT_AI_MODEL,
         *,
         keep_alive: str = DEFAULT_OLLAMA_KEEP_ALIVE,
         transport: httpx.BaseTransport | None = None,
@@ -182,6 +182,44 @@ class AIClient:
             raise AIUnavailableError() from None
 
         return self._parse_response(response)
+
+    async def unload(self) -> None:
+        """Pede ao Ollama para descarregar o modelo configurado, sem apagar arquivos.
+
+        Contrato oficial: POST /api/generate com prompt vazio e keep_alive=0.
+        Não remove o modelo do disco nem encerra o serviço de IA.
+        """
+        if not self.is_configured():
+            raise AIUnavailableError()
+
+        payload = {
+            "model": self._model,
+            "prompt": "",
+            "stream": False,
+            "keep_alive": 0,
+        }
+        timeout = httpx.Timeout(min(30.0, self._timeout_seconds), connect=min(10.0, self._timeout_seconds))
+        url = f"{self._base_url}/api/generate"
+        try:
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                transport=self._transport,
+                follow_redirects=False,
+            ) as client:
+                response = await client.post(url, json=payload)
+        except httpx.TimeoutException:
+            logger.warning("Falha ao descarregar a IA: timeout")
+            raise AITimeoutError() from None
+        except httpx.HTTPError:
+            logger.warning("Falha ao descarregar a IA: conexao")
+            raise AIUnavailableError() from None
+
+        if response.status_code in _GATEWAY_TIMEOUT_STATUSES:
+            logger.warning("Falha ao descarregar a IA: status=%s (timeout no gateway)", response.status_code)
+            raise AITimeoutError()
+        if response.status_code != 200:
+            logger.warning("Falha ao descarregar a IA: status=%s", response.status_code)
+            raise AIUnavailableError()
 
     def _parse_response(self, response: httpx.Response) -> AIExplanation:
         if response.status_code in _GATEWAY_TIMEOUT_STATUSES:

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.errors import public_validation_errors
+from app.api.routes.ai import router as ai_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.conversations import router as conversations_router
@@ -59,7 +60,7 @@ app = FastAPI(
     title="StudyBuddy AI",
     description=(
         "Backend da plataforma de estudos StudyBuddy AI: autenticação, "
-        "documentos persistidos por usuário e chat com Gemma 3:4b via Ollama."
+        "documentos persistidos por usuário e chat com Gemma 4 E4B via Ollama."
     ),
     version="0.3.0",
     lifespan=lifespan,
@@ -81,6 +82,7 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(ai_router)
 app.include_router(documents_router)
 app.include_router(conversations_router)
 app.include_router(questions_router)
