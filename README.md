@@ -10,134 +10,120 @@ Esta branch (`backend`) contém a API Python do **StudyBuddy AI**.
 
 # StudyBuddy AI — Backend
 
-Backend da plataforma de estudos: o estudante envia um PDF, pergunta sobre o conteúdo e recebe explicações de um professor virtual.
+API do professor virtual: o estudante autentica, envia um PDF e pergunta sobre o material. O backend recupera páginas reais e consulta **Gemma 3:4b via Ollama**. A URL da IA fica só no servidor.
 
-O serviço de IA é acessado **somente pelo backend**. A URL do modelo não deve ir para o frontend.
+## Arquitetura
 
-## Escopo atual
+```text
+Frontend  --CORS-->  FastAPI
+                      ├─ JWT (cadastro/login/logout)
+                      ├─ SQLite (dev) ou PostgreSQL
+                      ├─ extração PyMuPDF + retrieval lexical
+                      └─ AIClient --> Ollama / Gemma 3:4b
+```
 
-- `GET /health` — estado de saúde do backend
-- `POST /api/documents` — upload de PDF, extração por página e registro temporário em memória
-- `POST /api/chat` — pergunta sobre um documento já enviado
-- Recuperação lexical de páginas relevantes
-- Integração com `POST {AI_BASE_URL}/api/chat` e o modelo `gemma3:4b`
+- Documentos, conversas e usuários são **isolados por conta**.
+- Persistência padrão: SQLite em `data/studybuddy.db` (sobrevive a restart).
+- PostgreSQL é opcional via `DATABASE_URL`.
+- Store em memória antigo permanece só como utilitário de testes unitários; a API usa o banco.
+- OCR **não** está implementado. PDF só com imagem é rejeitado.
+- Tokens JWT de acesso (8 h por padrão), com logout por denylist. **Não há refresh token** nesta versão: o frontend deve pedir login de novo após expirar ou logout.
 
-## Fora desta etapa
+## Endpoints
 
-- Banco de dados, autenticação e contas
-- Embeddings, banco vetorial e OCR
-- Interface, avatar e voz
+| Método | Caminho | Auth | Função |
+| --- | --- | --- | --- |
+| GET | `/health` | não | liveness da API |
+| GET | `/ready` | não | banco + se a IA está configurada |
+| POST | `/api/auth/register` | não | cadastro + token |
+| POST | `/api/auth/login` | não | login |
+| POST | `/api/auth/logout` | sim | invalida o token atual |
+| GET | `/api/auth/me` | sim | perfil |
+| POST | `/api/documents` | sim | upload PDF |
+| GET | `/api/documents` | sim | listagem paginada |
+| GET | `/api/documents/{id}` | sim | metadados + páginas |
+| DELETE | `/api/documents/{id}` | sim | exclusão |
+| POST | `/api/chat` | sim | pergunta (cria conversa se omitido `conversation_id`) |
+| GET/POST/DELETE | `/api/conversations` | sim | histórico |
 
-## Requisitos
+Auth: header `Authorization: Bearer <token>`.
 
-- Python 3.12 ou superior (verificado com Python 3.13)
-- Ambiente virtual Python
+### Upload (201)
+
+Campo `file` em `multipart/form-data`. Resposta inclui `document_id`, `filename`, `page_count`, `pages`, `deduplicated`.
+
+### Chat (200)
+
+```json
+{
+  "document_id": "uuid",
+  "conversation_id": "uuid",
+  "message": "Explique o conceito principal"
+}
+```
+
+Resposta:
+
+```json
+{
+  "document_id": "uuid",
+  "conversation_id": "uuid",
+  "answer": "Explicação",
+  "sources": [{"page": 2, "excerpt": "trecho real"}],
+  "model": "gemma3:4b",
+  "status": "completed",
+  "has_relevant_match": true
+}
+```
+
+`sources` vêm das páginas recuperadas pelo backend, não do modelo. `status` hoje é `completed` em sucesso; erros usam HTTP 502/503. Estados `thinking`/`answering` ficam para streaming futuro.
+
+## Integração com o frontend
+
+1. Não use a URL do Ollama no browser.
+2. Configure `CORS_ORIGINS` com a origem da UI.
+3. Cadastre/login → guarde `access_token` → envie Bearer em todas as rotas privadas.
+4. Upload → `document_id` → chat. Opcional: reutilizar `conversation_id`.
+5. **Mudança de contrato:** upload e chat agora exigem autenticação.
 
 ## Instalação
 
-No Windows:
+Windows:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env
+# edite JWT_SECRET em .env
+uvicorn app.main:app --reload
 ```
 
-No Linux ou macOS:
+Linux/macOS:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-```
-
-Se o comando `python` não estiver no PATH, use o executável completo da instalação local.
-
-## Configuração
-
-As variáveis ficam em `.env`. Use `.env.example` como modelo. Não versione credenciais reais.
-
-| Variável | Função |
-| --- | --- |
-| `AI_BASE_URL` | URL base do serviço de IA, usada só no backend |
-| `AI_MODEL` | Nome do modelo (`gemma3:4b`) |
-| `AI_TIMEOUT_SECONDS` | Timeout das chamadas à IA |
-| `MAX_PDF_SIZE_MB` | Limite de upload de PDF, em megabytes |
-| `DOCUMENT_TTL_MINUTES` | Tempo de vida dos documentos em memória |
-| `MAX_STORED_DOCUMENTS` | Quantidade máxima de documentos simultâneos |
-| `MAX_STORED_TEXT_CHARS` | Tamanho máximo total do texto armazenado |
-| `MAX_CHAT_MESSAGE_CHARS` | Tamanho máximo da pergunta |
-| `MAX_RETRIEVAL_PAGES` | Páginas enviadas como contexto |
-| `MAX_CONTEXT_CHARS` | Limite de caracteres do contexto |
-
-Os documentos ficam só em memória. **Eles são perdidos quando o processo reinicia** e deixam de ser acessíveis após o TTL (padrão 30 minutos).
-
-## Execução
-
-Na raiz do projeto, com o ambiente virtual ativo:
-
-```bash
 uvicorn app.main:app --reload
 ```
 
-- API: `http://127.0.0.1:8000`
-- Health: `http://127.0.0.1:8000/health`
-- Upload: `http://127.0.0.1:8000/api/documents`
-- Chat: `http://127.0.0.1:8000/api/chat`
-- Swagger: `http://127.0.0.1:8000/docs`
+Swagger: `http://127.0.0.1:8000/docs`
 
-## `POST /api/documents`
+## Banco
 
-Campo `file` em `multipart/form-data`. O backend valida o conteúdo do PDF, extrai o texto por página e guarda o resultado em memória.
+Dev (padrão): SQLite. A API cria as tabelas na inicialização.
 
-Sucesso — HTTP 201:
+PostgreSQL opcional:
 
-```json
-{
-  "document_id": "identificador-uuid",
-  "filename": "material.pdf",
-  "page_count": 2,
-  "pages": [
-    {"page_number": 1, "text": "Texto extraído da primeira página"},
-    {"page_number": 2, "text": "Texto extraído da segunda página"}
-  ]
-}
+```bash
+docker compose up -d postgres
+# DATABASE_URL=postgresql+psycopg2://studybuddy:studybuddy@localhost:5432/studybuddy
+alembic upgrade head
 ```
 
-O `document_id` é o identificador usado depois em `/api/chat`.
-
-## `POST /api/chat`
-
-```json
-{
-  "document_id": "id-retornado-no-upload",
-  "message": "Explique o conceito principal deste capítulo"
-}
-```
-
-Sucesso — HTTP 200:
-
-```json
-{
-  "document_id": "id-do-documento",
-  "answer": "Explicação produzida pelo professor",
-  "sources": [
-    {"page": 3, "excerpt": "Trecho real extraído do documento"}
-  ],
-  "model": "gemma3:4b"
-}
-```
-
-As fontes são montadas pelo backend a partir das páginas recuperadas. Números de página gerados pelo modelo são ignorados.
-
-| HTTP | Situação |
-| --- | --- |
-| 404 | Documento inexistente ou expirado |
-| 422 | Mensagem vazia ou grande demais |
-| 502 | Resposta inválida da IA |
-| 503 | IA indisponível ou em timeout |
+`JWT_SECRET` precisa estar definido para o Alembic/Settings carregarem.
 
 ## Testes
 
@@ -145,26 +131,11 @@ As fontes são montadas pelo backend a partir das páginas recuperadas. Números
 pytest
 ```
 
-A suíte usa mocks para a IA e **não depende** do túnel público.
+A suíte usa SQLite em memória e **mock da IA**. Não depende do túnel.
 
-## Limitações conhecidas
+## Limitações
 
-- Sem login: quem tiver o `document_id` acessa o documento até expirar.
-- Sem banco: os dados somem ao reiniciar o processo.
-- A URL da IA fica só em variável de ambiente (`AI_BASE_URL`), nunca no frontend.
-- PDFs sem texto extraível (somente imagem) não são suportados nesta etapa.
-
-## Estrutura
-
-```text
-app/
-  main.py
-  api/routes/             # health, documents, chat
-  core/config.py
-  schemas/
-  services/documents.py   # extração de PDFs
-  services/document_store.py  # memória temporária
-  services/retrieval.py   # seleção lexical de páginas
-  services/ai_client.py   # POST /api/chat
-tests/
-```
+- Prompt injection em PDFs não pode ser eliminada por completo; o conteúdo é tratado como material de estudo, não como instrução de sistema.
+- Sem OCR, embeddings, avatar, voz ou S3/MinIO (arquivos originais não são gravados; só o texto extraído).
+- Rate limit em memória por processo; não compartilha entre workers.
+- JWT sem refresh; logout só invalida o `jti` apresentado.
